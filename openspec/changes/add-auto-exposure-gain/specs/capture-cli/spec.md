@@ -13,9 +13,6 @@ The CLI SHALL let callers opt into device-provided automatic exposure and gain a
 - **WHEN** the user passes `--auto-exposure` or `--auto-gain`
 - **THEN** the CLI emits a debug log explaining the control is unavailable
 - **AND** it proceeds with any manual exposure/gain parameters that were supplied.
-
-## MODIFIED Requirements
-### Requirement: Auto Exposure And Gain Controls
 #### Scenario: Auto Control Needs Warm-Up
 - **GIVEN** the user enables auto exposure and/or gain
 - **WHEN** the CLI captures a frame
