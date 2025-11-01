@@ -1,0 +1,15 @@
+## ADDED Requirements
+### Requirement: Auto Exposure And Gain Controls
+The CLI SHALL let callers opt into device-provided automatic exposure and gain adjustments before capturing a frame.
+
+#### Scenario: Auto Control Available
+- **GIVEN** a V4L2 device that reports `Exposure, Auto` and/or `Gain, Auto` controls
+- **WHEN** the user passes `--auto-exposure` and/or `--auto-gain`
+- **THEN** the CLI enables the corresponding auto control(s) prior to capture
+- **AND** it records in logs/JSON summary that auto adjustment is active.
+
+#### Scenario: Auto Control Missing
+- **GIVEN** a V4L2 device that does not expose the requested auto control
+- **WHEN** the user passes `--auto-exposure` or `--auto-gain`
+- **THEN** the CLI emits a debug log explaining the control is unavailable
+- **AND** it proceeds with any manual exposure/gain parameters that were supplied.

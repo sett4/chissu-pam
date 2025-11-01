@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -8,7 +9,7 @@ use image::{ColorType, GrayImage, ImageEncoder};
 use tracing::debug;
 use v4l::buffer::Type;
 use v4l::capability::{Capabilities, Flags as CapabilityFlags};
-use v4l::control::{Control, Description, Value};
+use v4l::control::{Control, Description, Type as ControlType, Value};
 use v4l::format::{Format, FourCC};
 use v4l::framesize::FrameSizeEnum;
 use v4l::io::mmap::Stream;
@@ -26,6 +27,8 @@ pub struct CaptureConfig {
     pub height: Option<u32>,
     pub exposure: Option<i32>,
     pub gain: Option<i32>,
+    pub auto_exposure: bool,
+    pub auto_gain: bool,
     pub output: Option<PathBuf>,
 }
 
@@ -38,6 +41,8 @@ impl From<&CaptureArgs> for CaptureConfig {
             height: args.height,
             exposure: args.exposure,
             gain: args.gain,
+            auto_exposure: args.auto_exposure,
+            auto_gain: args.auto_gain,
             output: args.output.clone(),
         }
     }
@@ -98,6 +103,10 @@ pub struct CaptureSummary {
     pub exposure: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gain: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_exposure: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_gain: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -168,7 +177,7 @@ pub fn run_capture(config: &CaptureConfig) -> AppResult<CaptureOutcome> {
         negotiated.pixel_format, negotiated.width, negotiated.height
     ));
 
-    apply_controls(&mut device, config, &mut logs)?;
+    let control_report = apply_controls(&mut device, config, &mut logs)?;
 
     let mut stream = Stream::with_buffers(&device, Type::VideoCapture, 4)?;
     let (data, _) = stream.next()?;
@@ -185,6 +194,8 @@ pub fn run_capture(config: &CaptureConfig) -> AppResult<CaptureOutcome> {
         format: negotiated,
         exposure: config.exposure,
         gain: config.gain,
+        auto_exposure: control_report.auto_exposure,
+        auto_gain: control_report.auto_gain,
     };
 
     Ok(CaptureOutcome { summary, logs })
@@ -254,25 +265,107 @@ fn ensure_framesize_supported(
     })
 }
 
+#[derive(Default)]
+struct ControlReport {
+    auto_exposure: Option<String>,
+    auto_gain: Option<String>,
+}
+
 fn apply_controls(
     device: &mut v4l::Device,
     config: &CaptureConfig,
     logs: &mut Vec<String>,
-) -> AppResult<()> {
-    if config.exposure.is_none() && config.gain.is_none() {
-        return Ok(());
+) -> AppResult<ControlReport> {
+    if config.exposure.is_none()
+        && config.gain.is_none()
+        && !config.auto_exposure
+        && !config.auto_gain
+    {
+        return Ok(ControlReport::default());
     }
 
-    let controls = match device.query_controls() {
-        Ok(list) => list,
-        Err(err) => {
+    let controls = match catch_unwind_silent(|| device.query_controls()) {
+        Ok(Ok(list)) => list,
+        Ok(Err(err)) => {
             logs.push(format!("Unable to query controls: {}", err));
-            return Ok(());
+            return Ok(apply_fallback_controls(device, config, logs));
+        }
+        Err(_) => {
+            logs.push(
+                "Unable to query controls: driver reported an unsupported control type".into(),
+            );
+            return Ok(apply_fallback_controls(device, config, logs));
         }
     };
 
+    let mut report = ControlReport::default();
+    let mut auto_exposure_active = false;
+    let mut auto_gain_active = false;
+
+    if config.auto_exposure {
+        match find_control(
+            &controls,
+            &[
+                "Exposure, Auto",
+                "Exposure Auto",
+                "Auto Exposure",
+                "Auto_Exposure",
+            ],
+        ) {
+            Some(ctrl) => {
+                let value = auto_control_value(ctrl);
+                match device.set_control(Control { id: ctrl.id, value }) {
+                    Ok(_) => {
+                        logs.push(format!("Enabled auto exposure via '{}'", ctrl.name));
+                        report.auto_exposure = Some("applied".into());
+                        auto_exposure_active = true;
+                    }
+                    Err(err) => {
+                        logs.push(format!("Failed to enable auto exposure: {}", err));
+                        report.auto_exposure = Some("failed".into());
+                    }
+                }
+            }
+            None => {
+                logs.push("Auto exposure control not supported".into());
+                report.auto_exposure = Some("unsupported".into());
+            }
+        }
+    }
+
+    if config.auto_gain {
+        match find_control(
+            &controls,
+            &["Gain, Auto", "Auto Gain", "Gain Auto", "Gain Automatic"],
+        ) {
+            Some(ctrl) => {
+                let value = auto_control_value(ctrl);
+                match device.set_control(Control { id: ctrl.id, value }) {
+                    Ok(_) => {
+                        logs.push(format!("Enabled auto gain via '{}'", ctrl.name));
+                        report.auto_gain = Some("applied".into());
+                        auto_gain_active = true;
+                    }
+                    Err(err) => {
+                        logs.push(format!("Failed to enable auto gain: {}", err));
+                        report.auto_gain = Some("failed".into());
+                    }
+                }
+            }
+            None => {
+                logs.push("Auto gain control not supported".into());
+                report.auto_gain = Some("unsupported".into());
+            }
+        }
+    }
+
     if let Some(exposure) = config.exposure {
-        if let Some(ctrl) = find_control(&controls, &["Exposure (Absolute)", "Exposure"]) {
+        if auto_exposure_active {
+            logs.push("Skipping manual exposure because auto exposure is active".into());
+        } else if let Some(ctrl) = find_control(
+            &controls,
+            &["Exposure (Absolute)", "Exposure", "Exposure Time Absolute"],
+        ) {
             match device.set_control(Control {
                 id: ctrl.id,
                 value: Value::Integer(exposure as i64),
@@ -286,7 +379,9 @@ fn apply_controls(
     }
 
     if let Some(gain) = config.gain {
-        if let Some(ctrl) = find_control(&controls, &["Gain"]) {
+        if auto_gain_active {
+            logs.push("Skipping manual gain because auto gain is active".into());
+        } else if let Some(ctrl) = find_control(&controls, &["Gain"]) {
             match device.set_control(Control {
                 id: ctrl.id,
                 value: Value::Integer(gain as i64),
@@ -299,7 +394,7 @@ fn apply_controls(
         }
     }
 
-    Ok(())
+    Ok(report)
 }
 
 fn ensure_output_path(custom: Option<&PathBuf>) -> AppResult<PathBuf> {
@@ -425,9 +520,116 @@ fn fourcc_to_string(fourcc: FourCC) -> String {
 }
 
 fn find_control<'a>(controls: &'a [Description], names: &[&str]) -> Option<&'a Description> {
-    controls
-        .iter()
-        .find(|ctrl| names.iter().any(|name| ctrl.name == *name))
+    controls.iter().find(|ctrl| {
+        let ctrl_norm = normalize_control_name(&ctrl.name);
+        names
+            .iter()
+            .any(|name| ctrl_norm == normalize_control_name(name))
+    })
+}
+
+fn normalize_control_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_' | ','))
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn catch_unwind_silent<F, T>(f: F) -> std::thread::Result<T>
+where
+    F: FnOnce() -> T + panic::UnwindSafe,
+{
+    let hook = panic::take_hook();
+    panic::set_hook(Box::new(|_| {}));
+    let result = panic::catch_unwind(AssertUnwindSafe(f));
+    panic::set_hook(hook);
+    result
+}
+
+fn apply_fallback_controls(
+    device: &mut v4l::Device,
+    config: &CaptureConfig,
+    logs: &mut Vec<String>,
+) -> ControlReport {
+    const CID_EXPOSURE_AUTO: u32 = 0x009a0901;
+    const CID_EXPOSURE_ABSOLUTE: u32 = 0x009a0902;
+    const CID_GAIN: u32 = 0x00980913;
+    const V4L2_EXPOSURE_APERTURE_PRIORITY: i64 = 3;
+
+    let mut report = ControlReport::default();
+
+    logs.push("Falling back to legacy control IDs due to query failure".into());
+
+    if config.auto_exposure {
+        match device.set_control(Control {
+            id: CID_EXPOSURE_AUTO,
+            value: Value::Integer(V4L2_EXPOSURE_APERTURE_PRIORITY),
+        }) {
+            Ok(_) => {
+                logs.push("Enabled auto exposure via fallback control (aperture priority)".into());
+                report.auto_exposure = Some("applied".into());
+            }
+            Err(err) => {
+                logs.push(format!(
+                    "Failed to enable auto exposure via fallback control: {}",
+                    err
+                ));
+                report.auto_exposure = Some("failed".into());
+            }
+        }
+    } else if config.exposure.is_some() {
+        logs.push("Skipping fallback auto exposure because manual exposure requested".into());
+    }
+
+    if let Some(exposure) = config.exposure {
+        match device.set_control(Control {
+            id: CID_EXPOSURE_ABSOLUTE,
+            value: Value::Integer(exposure as i64),
+        }) {
+            Ok(_) => logs.push(format!("Set exposure to {} via fallback control", exposure)),
+            Err(err) => logs.push(format!(
+                "Failed to set exposure via fallback control: {}",
+                err
+            )),
+        }
+    }
+
+    if config.auto_gain {
+        logs.push("Auto gain control fallback not available in legacy path".into());
+        report.auto_gain = Some("unsupported".into());
+    }
+
+    if let Some(gain) = config.gain {
+        match device.set_control(Control {
+            id: CID_GAIN,
+            value: Value::Integer(gain as i64),
+        }) {
+            Ok(_) => logs.push(format!("Set gain to {} via fallback control", gain)),
+            Err(err) => logs.push(format!("Failed to set gain via fallback control: {}", err)),
+        }
+    }
+
+    report
+}
+
+fn auto_control_value(ctrl: &Description) -> Value {
+    match ctrl.typ {
+        ControlType::Boolean => Value::Boolean(true),
+        ControlType::Menu | ControlType::Integer | ControlType::IntegerMenu => {
+            let default = ctrl.default;
+            let min = ctrl.minimum;
+            let max = ctrl.maximum;
+            let candidate = if default != min {
+                default
+            } else if max != min {
+                max
+            } else {
+                min
+            };
+            Value::Integer(candidate)
+        }
+        _ => Value::Integer(ctrl.default),
+    }
 }
 
 #[cfg(test)]
@@ -514,6 +716,8 @@ mod tests {
             },
             exposure: Some(120),
             gain: None,
+            auto_exposure: None,
+            auto_gain: None,
         };
 
         let json = serde_json::to_value(&summary).expect("serialize summary");
@@ -522,5 +726,34 @@ mod tests {
         assert_eq!(json["format"]["pixel_format"], "Y16");
         assert_eq!(json["output_path"], "/tmp/captures/test.png");
         assert!(json["gain"].is_null());
+        assert!(json["auto_exposure"].is_null());
+        assert!(json["auto_gain"].is_null());
+    }
+
+    #[test]
+    fn summary_includes_auto_states_when_present() {
+        let summary = CaptureSummary {
+            success: true,
+            output_path: "/tmp/captures/test.png".into(),
+            device: DeviceSummary {
+                driver: "uvcvideo".into(),
+                card: "Test Cam".into(),
+                bus_info: "usb-1".into(),
+                path: "/dev/video0".into(),
+            },
+            format: NegotiatedFormat {
+                pixel_format: "Y16".into(),
+                width: 640,
+                height: 480,
+            },
+            exposure: None,
+            gain: None,
+            auto_exposure: Some("applied".into()),
+            auto_gain: Some("unsupported".into()),
+        };
+
+        let json = serde_json::to_value(&summary).expect("serialize summary");
+        assert_eq!(json["auto_exposure"], "applied");
+        assert_eq!(json["auto_gain"], "unsupported");
     }
 }

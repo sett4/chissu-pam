@@ -53,6 +53,14 @@ pub struct CaptureArgs {
     #[arg(long)]
     pub gain: Option<i32>,
 
+    /// Enable device-provided automatic exposure before capture
+    #[arg(long)]
+    pub auto_exposure: bool,
+
+    /// Enable device-provided automatic gain before capture
+    #[arg(long)]
+    pub auto_gain: bool,
+
     /// Optional output file path (defaults to captures/<timestamp>.png)
     #[arg(long)]
     pub output: Option<PathBuf>,

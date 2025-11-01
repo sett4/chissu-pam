@@ -34,6 +34,14 @@ cargo run -- capture \
   --gain 4
 ```
 
+Let the camera negotiate exposure/gain automatically when the device supports it:
+
+```bash
+cargo run -- capture \
+  --auto-exposure \
+  --auto-gain
+```
+
 Request JSON output suitable for scripting:
 
 ```bash
@@ -57,7 +65,8 @@ Example JSON payload:
     "width": 640,
     "height": 480
   },
-  "exposure": 120
+  "exposure": 120,
+  "auto_exposure": "applied"
 }
 ```
 

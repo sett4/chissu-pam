@@ -30,6 +30,19 @@ cargo run -- capture \
 - The logs should include messages such as `Set exposure to 160` or `Exposure control not supported`.
 - Inspect the saved PNG under `./captures/` to confirm brightness adjustments.
 
+To defer to the camera's automatic controls when available:
+
+```bash
+cargo run -- capture \
+  --device /dev/video0 \
+  --pixel-format Y16 \
+  --auto-exposure \
+  --auto-gain
+```
+
+- Expect logs like `Enabled auto exposure` / `Enabled auto gain`. If a control is missing, the CLI prints `Auto exposure control not supported` and continues with manual values.
+- When auto is active, manual `--exposure`/`--gain` settings are skipped to avoid conflicting changes.
+
 ## Failure modes
 
 - Intentionally request an unsupported pixel format (e.g. `--pixel-format MJPG`). Verify the CLI exits with code `2`, prints the unsupported-format error, and does **not** create a file.

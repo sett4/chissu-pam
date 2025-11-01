@@ -1,0 +1,6 @@
+- [x] 1. Inspect available V4L2 auto exposure/gain control names and extend helper utilities as needed.
+- [x] 2. Add CLI flags (auto exposure/gain) plus config plumbing, keeping backward compatibility with manual settings.
+- [x] 3. Update capture pipeline to toggle auto controls when requested, falling back gracefully with informative logs when unsupported.
+- [x] 4. Extend unit tests for control selection and frame summaries; add JSON/human logging assertions if feasible.
+- [x] 5. Refresh README/manual docs to cover the new flags and behavior.
+- [x] 6. Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` to verify the changes.
