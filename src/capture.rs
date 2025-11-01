@@ -29,6 +29,7 @@ pub struct CaptureConfig {
     pub gain: Option<i32>,
     pub auto_exposure: bool,
     pub auto_gain: bool,
+    pub warmup_frames: u32,
     pub output: Option<PathBuf>,
 }
 
@@ -43,6 +44,7 @@ impl From<&CaptureArgs> for CaptureConfig {
             gain: args.gain,
             auto_exposure: args.auto_exposure,
             auto_gain: args.auto_gain,
+            warmup_frames: args.warmup_frames,
             output: args.output.clone(),
         }
     }
@@ -180,6 +182,22 @@ pub fn run_capture(config: &CaptureConfig) -> AppResult<CaptureOutcome> {
     let control_report = apply_controls(&mut device, config, &mut logs)?;
 
     let mut stream = Stream::with_buffers(&device, Type::VideoCapture, 4)?;
+    if config.warmup_frames > 0 {
+        logs.push(format!(
+            "Discarding {} warm-up frame(s) before capture",
+            config.warmup_frames
+        ));
+        for idx in 0..config.warmup_frames {
+            let _ = stream.next().map_err(|err| {
+                AppError::FrameProcessing(format!(
+                    "failed to read warm-up frame {}: {}",
+                    idx + 1,
+                    err
+                ))
+            })?;
+        }
+    }
+
     let (data, _) = stream.next()?;
     let image = convert_frame_to_image(data, &format)?;
 

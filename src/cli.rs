@@ -61,6 +61,10 @@ pub struct CaptureArgs {
     #[arg(long)]
     pub auto_gain: bool,
 
+    /// Number of warm-up frames to discard before saving the captured image
+    #[arg(long, default_value_t = 4)]
+    pub warmup_frames: u32,
+
     /// Optional output file path (defaults to captures/<timestamp>.png)
     #[arg(long)]
     pub output: Option<PathBuf>,

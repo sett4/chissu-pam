@@ -42,6 +42,7 @@ cargo run -- capture \
 
 - Expect logs like `Enabled auto exposure` / `Enabled auto gain`. If a control is missing, the CLI prints `Auto exposure control not supported` and continues with manual values.
 - When auto is active, manual `--exposure`/`--gain` settings are skipped to avoid conflicting changes.
+- The CLI drops warm-up frames before saving; use `--warmup-frames <N>` to tune how many frames are discarded if your image still looks under/over-exposed.
 
 ## Failure modes
 

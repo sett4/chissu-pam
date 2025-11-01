@@ -4,3 +4,4 @@
 - [x] 4. Extend unit tests for control selection and frame summaries; add JSON/human logging assertions if feasible.
 - [x] 5. Refresh README/manual docs to cover the new flags and behavior.
 - [x] 6. Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` to verify the changes.
+- [x] 7. Add warm-up frame handling so auto controls can settle before capture and document the tuning flag.
