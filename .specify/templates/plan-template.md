@@ -11,27 +11,27 @@
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
+**Language/Version**: Rust 1.80+ (stable)
+**Primary Dependencies**: `v4l`, `clap`, `serde`, `serde_json`, `image`
+**Storage**: N/A (ローカルファイル保存のみ)
+**Testing**: `cargo test` (必須), `cargo nextest` (任意)
+**Target Platform**: Linux (x86_64) with V4L2 デバイス
+**Project Type**: CLIツール (単一バイナリ)
+**Performance Goals**: 30fps相当のフレーム取得、1回のキャプチャ実行時間は60秒以内
+**Constraints**: 出力ファイルは500MB未満、`cargo clippy -- -D warnings` を常時通過
+**Scale/Scope**: 単一リポジトリ・単一CLI、学習用ツール
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+必要に応じて実際の作業内容で数値や制約を上書きしてください。
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] 原則I: `cargo fmt --check` / `cargo clippy -- -D warnings` をCIとローカルの両方で実行計画に含めた
+- [ ] 原則II: 対応デバイスのV4L2機能検証(フォーマット・解像度)を設計に組み込んだ
+- [ ] 原則III: 人間可読出力と `--json` 出力設計、エラーハンドリングと終了コードを定義した
+- [ ] 原則IV: モック/録画済みフレームを用いたテスト戦略と実機テスト手順を書面化した
+- [ ] 原則V: READMEやdocsへの知見反映タスクをPlan内に追加した
 
 ## Project Structure
 
@@ -48,51 +48,27 @@ specs/[###-feature]/
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
 src/
-├── models/
-├── services/
-├── cli/
-└── lib/
+├── cli/            # clapベースのCLI定義
+├── capture/        # V4L2デバイスとのやり取り
+├── infrared/       # フレーム処理・フィルタ
+├── config/         # 設定読み込みと検証
+└── utils/          # 共通ヘルパ
 
 tests/
-├── contract/
-├── integration/
-└── unit/
+├── integration/    # モック/録画データを用いた統合テスト
+├── snapshots/      # 期待されるIRフレームのサンプル
+└── unit/           # ピュアロジックのユニットテスト
 
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
+docs/
+└── guides/         # 学習ノート・手順
 
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+captures/           # 出力先(リポジトリには含めない)
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: 単一CLI構成を維持し、`src/` 以下をコンポーネント単位で分割する。テストは`tests/` 以下で種類別に管理し、`docs/` に知見を追記する。
 
 ## Complexity Tracking
 
@@ -100,5 +76,5 @@ directories captured above]
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+| [e.g., 追加のcrate導入] | [current need] | [why現状構成では不足] |
+| [e.g., unsafe使用] | [specific problem] | [safe実装では性能/互換性が不足] |

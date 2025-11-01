@@ -1,0 +1,8 @@
+- [x] 1. Scaffold the Rust project workspace (Cargo manifest, binary crate) and add dependencies: `clap`, `v4l`, `image`, `serde`, `serde_json`, `tracing` (or similar logger).
+- [x] 2. Implement CLI argument parsing covering device selector, pixel format, resolution, exposure, gain, output path, verbosity, and `--json` flag.
+- [x] 3. Add V4L2 capability interrogation logic that validates device features and supported formats before capture, surfacing descriptive errors.
+- [x] 4. Implement frame capture pipeline that negotiates format, captures a single frame, converts to PNG, and writes under `./captures/` with timestamped default naming.
+- [x] 5. Provide dual output modes: human-readable logging by default and structured JSON payload when `--json` is set, ensuring stderr carries errors.
+- [x] 6. Create automated tests (unit or integration) using mock/recorded frame data to validate capability handling, frame conversion, and output serialization.
+- [x] 7. Document CLI usage (human + JSON examples), manual hardware validation steps, and update README/docs per governance expectations.
+- [x] 8. Verify formatting, linting, and tests via `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test`, recording results for review.

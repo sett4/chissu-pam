@@ -1,50 +1,65 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+Version: 0.0.0 → 1.0.0
+Modified Principles: 新規作成
+Added Sections: なし
+Removed Sections: なし
+Templates:
+  ✅ .specify/templates/plan-template.md
+  ✅ .specify/templates/spec-template.md
+  ✅ .specify/templates/tasks-template.md
+  ✅ .specify/templates/agent-file-template.md
+  ⚠ .specify/templates/commands (ディレクトリ未作成のため対象外)
+Follow-up TODOs: なし
+-->
+# study-rust-v4l2 Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Rust安全性を最優先
+- Rust安定版(1.80以降)でのビルドを前提とし、`cargo fmt --check` と `cargo clippy -- -D warnings` を常時通過させること。
+- `unsafe` ブロックは原則禁止とし、必要な場合は局所化・理由コメント・対応テスト(ユニットもしくは統合)を同一ディレクトリに追加すること。
+  安全なRust実装を前提にすることで、学習目的のコードでもハードウェア制御時の予期せぬ挙動を防止する。
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. V4L2互換性検証を徹底
+- すべてのキャプチャ処理は `v4l` クレートを用いたV4L2デバイス制御を行い、開始前にデバイス機能・フォーマット・解像度を検証すること。
+- CLIは赤外線取得に必要な設定(例: フィルタ切替、露光、ゲイン)を引数または設定ファイルで明示的に受け取り、サポート外の場合は即座にエラー終了すること。
+  ハードウェア互換性を確保することで、学習環境ごとの差異による失敗を早期に発見できる。
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. 観測可能なCLI体験を提供
+- すべてのコマンドは人間可読な標準出力と、`--json` 指定時の構造化出力(JSON)を提供し、エラーは標準エラーに記録すること。
+- 重要イベント(デバイス選択、フォーマット決定、フレーム保存先)はログレベル付きで出力し、終了コードで成功/失敗を明示すること。
+  可視化された出力により、利用者と自動テストの両方が結果を検証できる。
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. テスト可能なキャプチャフローを維持
+- `cargo test` で実行可能なユニットテストと、モックまたは録画済みフレームを用いた統合テスト(ハードウェア不要)を必ず用意すること。
+- 実機依存の確認項目(例: 赤外線強度チェック)は `tests/integration/` に手動フラグ付きテストを配置し、実行手順をREADMEに明記すること。
+  テスト容易性を重視し、学習過程でも機能回帰を防ぐ。
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. 学習成果と知見の記録
+- 新規機能や探索結果は `docs/` または `openspec/project.md` に手順・注意点・参考資料として追記すること。
+- CLI使用例、依存パラメータ、ハードウェア前提条件をリリースノートとREADMEに反映し、再現可能な学習環境を維持すること。
+  知見を共有することで、学習目的プロジェクトとしての価値を継続的に高められる。
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## 運用・技術制約
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+- 対象OSはV4L2をサポートするLinuxディストリビューション(推奨: Debian/Ubuntu系)とする。
+- Rust 1.80以上、主要クレートは `v4l`, `clap`, `serde`, `serde_json`, `image` を採用し、ライセンス互換性を確認する。
+- IR対応Webカメラを前提とし、必要に応じてIRフィルタの有無や外部照射装置をドキュメント化する。
+- 出力ファイルは既定で `./captures/` に保存し、1ファイルあたり最大500MBを超えないようローテーションまたは圧縮を検討する。
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## 開発ワークフローとレビュー
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- すべての変更は `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` をローカルで通したうえでレビューを申請する。
+- PRはCLI操作例(人間可読 + JSON)と、テストの実行結果ログ(必要ならスクリーンショット)を添付する。
+- ハードウェア依存の変更はレビュワーが再現可能な手順(デバイス設定、照明条件、期待結果)をPR説明に含める。
+- ドキュメント更新(README, docs/, openspec project)はコード変更と同一PRで行い、知見の欠落を防ぐ。
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+- 本憲章は開発ガイドラインの最上位ドキュメントとし、競合する場合は本憲章を優先する。
+- 憲章の改訂は提案+影響調査+テンプレート反映を含むPRで行い、メンテナの承認後にマージすること。
+- 変更内容が原則の追加・削除・名称変更を含む場合はマイナー以上のバージョン更新を行う。
+- 各PRレビューでは本憲章の遵守チェックリストを確認し、違反がある場合は是正計画を添える。
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-10-26 | **Last Amended**: 2025-10-26
