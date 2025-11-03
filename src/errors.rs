@@ -70,6 +70,15 @@ pub enum AppError {
     #[error("descriptor file {path} is invalid: {message}")]
     InvalidFeatureFile { path: PathBuf, message: String },
 
+    #[error("descriptor payload in {path} failed validation: {message}")]
+    DescriptorValidation { path: PathBuf, message: String },
+
+    #[error("invalid user name '{user}': {message}")]
+    InvalidUser { user: String, message: String },
+
+    #[error("no descriptor with id {descriptor_id} found for user {user}")]
+    DescriptorNotFound { user: String, descriptor_id: String },
+
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
@@ -87,6 +96,9 @@ impl AppError {
             AppError::ModelLoad { .. } => ExitCode::from(2),
             AppError::FeatureRead { .. } => ExitCode::from(2),
             AppError::InvalidFeatureFile { .. } => ExitCode::from(2),
+            AppError::DescriptorValidation { .. } => ExitCode::from(3),
+            AppError::InvalidUser { .. } => ExitCode::from(2),
+            AppError::DescriptorNotFound { .. } => ExitCode::from(4),
             _ => ExitCode::from(1),
         }
     }

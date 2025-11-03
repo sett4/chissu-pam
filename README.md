@@ -166,6 +166,53 @@ cargo run -- faces compare --input reference.json --compare-target candidate.jso
 
 If any descriptor file is missing, unreadable, or contains no faces, the command aborts, prints an error to `stderr`, and exits with status code `2`.
 
+### Face feature enrollment
+
+Register descriptor vectors with a specific Linux user so the planned PAM module can perform facial authentication. Point the command at a descriptor JSON exported by `faces extract`:
+
+```bash
+cargo run -- faces enroll --user alice captures/features/reference.json
+```
+
+Each descriptor receives a unique identifier and is appended to `/var/lib/study-rust-v4l2/models/alice.json` by default (created automatically with `0600` permissions). The store is a JSON array containing the descriptor vector, bounding box, source file, creation timestamp, and stable ID:
+
+```json
+[
+  {
+    "id": "4ac00b41-5f0d-4d2b-9a65-1bf01cb6cb4c",
+    "descriptor": [0.0123, 0.1042, 0.0831, 0.0987],
+    "bounding_box": { "left": 120, "top": 80, "right": 320, "bottom": 360 },
+    "source": "captures/features/reference.json",
+    "created_at": "2025-11-03T20:15:11.204Z"
+  }
+]
+```
+
+Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` (or the `STUDY_RUST_V4L2_STORE_DIR` environment variable) if you need the store under an alternate directory for testing or packaging; otherwise the default `/var/lib/study-rust-v4l2/models/` location is used.
+
+- Missing or unreadable descriptor files exit with status code `2`.
+- Malformed payloads or empty descriptor lists exit with status code `3` and leave the store untouched.
+- Descriptor length mismatches between the payload and the existing store also exit with status code `3`.
+
+### Face feature removal
+
+Remove descriptors from the store when they are no longer valid:
+
+```bash
+# Remove a specific descriptor by ID
+auth_id=$(cargo run -- faces enroll --user alice captures/features/reference.json --json | jq -r ".added[0].id")
+cargo run -- faces remove --user alice --descriptor-id "$auth_id"
+
+# Remove every descriptor for a user
+cargo run -- faces remove --user alice --all
+
+# Work against a non-default store directory
+cargo run -- faces enroll --user alice --store-dir ./captures/enrolled captures/features/reference.json
+cargo run -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./captures/enrolled
+```
+
+The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors).
+
 ## Testing
 
 Automated tests exercise frame conversion, JSON serialization, and filesystem handling:

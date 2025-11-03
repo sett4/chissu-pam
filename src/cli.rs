@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -36,6 +36,10 @@ pub enum FacesCommands {
     Extract(FaceExtractArgs),
     /// Compare face descriptor files produced by the extract command
     Compare(FaceCompareArgs),
+    /// Enroll descriptors into a per-user feature store
+    Enroll(FaceEnrollArgs),
+    /// Remove descriptors from a per-user feature store
+    Remove(FaceRemoveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -112,6 +116,44 @@ pub struct FaceCompareArgs {
     /// Descriptor JSON paths to compare against the input (repeatable)
     #[arg(long = "compare-target", required = true)]
     pub compare_targets: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct FaceEnrollArgs {
+    /// Target operating system user name
+    #[arg(long)]
+    pub user: String,
+
+    /// Path to the descriptor JSON exported by `faces extract`
+    pub descriptor: PathBuf,
+
+    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/study-rust-v4l2/models)
+    #[arg(long)]
+    pub store_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("selector")
+        .required(true)
+        .args(["descriptor_id", "all"]),
+))]
+pub struct FaceRemoveArgs {
+    /// Target operating system user name
+    #[arg(long)]
+    pub user: String,
+
+    /// Descriptor identifier to remove (repeat flag to delete multiple)
+    #[arg(long, conflicts_with = "all")]
+    pub descriptor_id: Vec<String>,
+
+    /// Remove all descriptors for the user
+    #[arg(long)]
+    pub all: bool,
+
+    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/study-rust-v4l2/models)
+    #[arg(long)]
+    pub store_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

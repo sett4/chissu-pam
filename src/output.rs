@@ -6,7 +6,9 @@ use serde_json::json;
 use crate::capture::CaptureOutcome;
 use crate::cli::OutputMode;
 use crate::errors::{AppError, AppResult};
-use crate::faces::{FaceComparisonOutcome, FaceExtractionOutcome};
+use crate::faces::{
+    FaceComparisonOutcome, FaceEnrollmentOutcome, FaceExtractionOutcome, FaceRemovalOutcome,
+};
 
 pub fn render_success(outcome: &CaptureOutcome, mode: OutputMode) -> AppResult<()> {
     match mode {
@@ -60,6 +62,62 @@ pub fn render_face_compare(outcome: &FaceComparisonOutcome, mode: OutputMode) ->
             let stdout = io::stdout();
             let mut handle = stdout.lock();
             let payload = serde_json::to_string(&outcome.scores)?;
+            handle.write_all(payload.as_bytes())?;
+            handle.write_all(b"\n")?;
+        }
+    }
+    Ok(())
+}
+
+pub fn render_face_enroll(outcome: &FaceEnrollmentOutcome, mode: OutputMode) -> AppResult<()> {
+    match mode {
+        OutputMode::Human => {
+            for line in &outcome.logs {
+                println!("{}", line);
+            }
+            println!(
+                "Enrollment successful: {} descriptor(s) added to {}",
+                outcome.added.len(),
+                outcome.store_path.display()
+            );
+        }
+        OutputMode::Json => {
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let payload = serde_json::to_string(&json!({
+                "user": outcome.user,
+                "store_path": outcome.store_path.display().to_string(),
+                "added": outcome.added,
+            }))?;
+            handle.write_all(payload.as_bytes())?;
+            handle.write_all(b"\n")?;
+        }
+    }
+    Ok(())
+}
+
+pub fn render_face_remove(outcome: &FaceRemovalOutcome, mode: OutputMode) -> AppResult<()> {
+    match mode {
+        OutputMode::Human => {
+            for line in &outcome.logs {
+                println!("{}", line);
+            }
+            println!(
+                "Removal successful: removed {} descriptor(s); remaining {}",
+                outcome.removed_ids.len(),
+                outcome.remaining
+            );
+        }
+        OutputMode::Json => {
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let payload = serde_json::to_string(&json!({
+                "user": outcome.user,
+                "store_path": outcome.store_path.display().to_string(),
+                "removed_ids": outcome.removed_ids,
+                "remaining": outcome.remaining,
+                "cleared": outcome.cleared,
+            }))?;
             handle.write_all(payload.as_bytes())?;
             handle.write_all(b"\n")?;
         }

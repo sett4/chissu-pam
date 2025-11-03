@@ -1,23 +1,28 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{SecondsFormat, Utc};
 use dlib_face_recognition::{
     FaceDetector, FaceDetectorTrait, FaceEncoderNetwork, FaceEncoderTrait, ImageMatrix,
     LandmarkPredictor, LandmarkPredictorTrait,
 };
 use image::{self, RgbImage};
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use tracing::debug;
+use uuid::Uuid;
 
-use crate::cli::{FaceCompareArgs, FaceExtractArgs};
+use crate::cli::{FaceCompareArgs, FaceEnrollArgs, FaceExtractArgs, FaceRemoveArgs};
 use crate::errors::{AppError, AppResult};
 
 const LANDMARK_ENV: &str = "DLIB_LANDMARK_MODEL";
 const ENCODER_ENV: &str = "DLIB_ENCODER_MODEL";
+const DEFAULT_STORE_DIR: &str = "/var/lib/study-rust-v4l2/models";
+const FEATURE_STORE_ENV: &str = "STUDY_RUST_V4L2_STORE_DIR";
 
 #[derive(Debug, Clone)]
 pub struct FaceExtractionConfig {
@@ -51,6 +56,42 @@ impl From<&FaceCompareArgs> for FaceComparisonConfig {
         Self {
             input: args.input.clone(),
             compare_targets: args.compare_targets.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FaceEnrollmentConfig {
+    pub user: String,
+    pub descriptor: PathBuf,
+    pub store_dir: Option<PathBuf>,
+}
+
+impl From<&FaceEnrollArgs> for FaceEnrollmentConfig {
+    fn from(args: &FaceEnrollArgs) -> Self {
+        Self {
+            user: args.user.clone(),
+            descriptor: args.descriptor.clone(),
+            store_dir: args.store_dir.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FaceRemovalConfig {
+    pub user: String,
+    pub descriptor_ids: Vec<String>,
+    pub remove_all: bool,
+    pub store_dir: Option<PathBuf>,
+}
+
+impl From<&FaceRemoveArgs> for FaceRemovalConfig {
+    fn from(args: &FaceRemoveArgs) -> Self {
+        Self {
+            user: args.user.clone(),
+            descriptor_ids: args.descriptor_id.clone(),
+            remove_all: args.all,
+            store_dir: args.store_dir.clone(),
         }
     }
 }
@@ -138,6 +179,41 @@ pub struct FaceComparisonScore {
 #[derive(Debug)]
 pub struct FaceComparisonOutcome {
     pub scores: Vec<FaceComparisonScore>,
+    pub logs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EnrolledDescriptor {
+    pub id: String,
+    pub descriptor: Vec<f64>,
+    pub bounding_box: BoundingBox,
+    pub source: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct EnrollmentRecord {
+    pub id: String,
+    pub descriptor_len: usize,
+    pub source: String,
+    pub created_at: String,
+}
+
+#[derive(Debug)]
+pub struct FaceEnrollmentOutcome {
+    pub user: String,
+    pub store_path: PathBuf,
+    pub added: Vec<EnrollmentRecord>,
+    pub logs: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct FaceRemovalOutcome {
+    pub user: String,
+    pub store_path: PathBuf,
+    pub removed_ids: Vec<String>,
+    pub remaining: usize,
+    pub cleared: bool,
     pub logs: Vec<String>,
 }
 
@@ -284,6 +360,162 @@ pub fn run_face_comparison(config: &FaceComparisonConfig) -> AppResult<FaceCompa
     Ok(FaceComparisonOutcome { scores, logs })
 }
 
+pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome> {
+    validate_user_name(&config.user)?;
+
+    let mut logs = Vec::new();
+    logs.push(format!(
+        "Loading descriptor payload from {}",
+        config.descriptor.display()
+    ));
+
+    let summary = load_summary(&config.descriptor)
+        .map_err(|err| map_to_descriptor_validation(&config.descriptor, err))?;
+    let descriptor_len = ensure_valid_faces(&summary.faces, &config.descriptor)
+        .map_err(|err| map_to_descriptor_validation(&config.descriptor, err))?;
+    logs.push(format!(
+        "Validated {} descriptor(s) with length {}",
+        summary.faces.len(),
+        descriptor_len
+    ));
+
+    let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
+    let mut existing = read_enrolled_store(&store_path)?;
+
+    if let Some(current_len) = existing.first().map(|entry| entry.descriptor.len()) {
+        if current_len != descriptor_len {
+            return Err(AppError::DescriptorValidation {
+                path: store_path.clone(),
+                message: format!(
+                    "descriptor length mismatch with existing store (expected {}, found {})",
+                    current_len, descriptor_len
+                ),
+            });
+        }
+    }
+
+    let mut added = Vec::with_capacity(summary.faces.len());
+    for face in &summary.faces {
+        let id = Uuid::new_v4().to_string();
+        let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let record = EnrolledDescriptor {
+            id: id.clone(),
+            descriptor: face.descriptor.clone(),
+            bounding_box: face.bounding_box.clone(),
+            source: config.descriptor.display().to_string(),
+            created_at: created_at.clone(),
+        };
+        existing.push(record);
+        added.push(EnrollmentRecord {
+            id,
+            descriptor_len,
+            source: config.descriptor.display().to_string(),
+            created_at,
+        });
+    }
+
+    write_enrolled_store(&store_path, &existing)?;
+    logs.push(format!(
+        "Enrolled {} descriptor(s) for user {}",
+        added.len(),
+        config.user
+    ));
+    logs.push(format!("Feature store: {}", store_path.display()));
+
+    Ok(FaceEnrollmentOutcome {
+        user: config.user.clone(),
+        store_path,
+        added,
+        logs,
+    })
+}
+
+pub fn run_face_removal(config: &FaceRemovalConfig) -> AppResult<FaceRemovalOutcome> {
+    validate_user_name(&config.user)?;
+
+    let mut logs = Vec::new();
+    let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
+    let existing = read_enrolled_store(&store_path)?;
+    logs.push(format!(
+        "Loaded {} descriptor(s) for user {}",
+        existing.len(),
+        config.user
+    ));
+
+    if config.remove_all {
+        let removed_ids = existing
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        if store_path.exists() {
+            fs::remove_file(&store_path).map_err(|source| AppError::FeatureWrite {
+                path: store_path.clone(),
+                source,
+            })?;
+        }
+        logs.push(format!("Removed all descriptors for user {}", config.user));
+        return Ok(FaceRemovalOutcome {
+            user: config.user.clone(),
+            store_path,
+            removed_ids,
+            remaining: 0,
+            cleared: true,
+            logs,
+        });
+    }
+
+    if existing.is_empty() {
+        if let Some(first) = config.descriptor_ids.first() {
+            return Err(AppError::DescriptorNotFound {
+                user: config.user.clone(),
+                descriptor_id: first.clone(),
+            });
+        }
+    }
+
+    let requested: HashSet<String> = config.descriptor_ids.iter().cloned().collect();
+    let mut retained = Vec::with_capacity(existing.len());
+    let mut removed_ids = Vec::new();
+
+    for entry in existing.into_iter() {
+        if requested.contains(&entry.id) {
+            removed_ids.push(entry.id.clone());
+        } else {
+            retained.push(entry);
+        }
+    }
+
+    if removed_ids.len() != requested.len() {
+        let removed_set: HashSet<&String> = removed_ids.iter().collect();
+        if let Some(missing) = requested.iter().find(|id| !removed_set.contains(id)) {
+            return Err(AppError::DescriptorNotFound {
+                user: config.user.clone(),
+                descriptor_id: missing.clone(),
+            });
+        }
+    }
+
+    write_enrolled_store(&store_path, &retained)?;
+    logs.push(format!(
+        "Removed {} descriptor(s) for user {}",
+        removed_ids.len(),
+        config.user
+    ));
+    logs.push(format!(
+        "Feature store now contains {} descriptor(s)",
+        retained.len()
+    ));
+
+    Ok(FaceRemovalOutcome {
+        user: config.user.clone(),
+        store_path,
+        removed_ids,
+        remaining: retained.len(),
+        cleared: false,
+        logs,
+    })
+}
+
 fn load_summary(path: &Path) -> AppResult<FaceExtractionSummary> {
     let file = File::open(path).map_err(|source| AppError::FeatureRead {
         path: path.to_path_buf(),
@@ -292,6 +524,126 @@ fn load_summary(path: &Path) -> AppResult<FaceExtractionSummary> {
     let reader = BufReader::new(file);
     let summary: FaceExtractionSummary = serde_json::from_reader(reader)?;
     Ok(summary)
+}
+
+fn write_enrolled_store(path: &Path, descriptors: &[EnrolledDescriptor]) -> AppResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| AppError::FeatureWrite {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = NamedTempFile::new_in(parent).map_err(|source| AppError::FeatureWrite {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    {
+        let file = tmp.as_file_mut();
+        {
+            let mut writer = BufWriter::new(&mut *file);
+            serde_json::to_writer_pretty(&mut writer, descriptors)?;
+            writer.flush().map_err(|source| AppError::FeatureWrite {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        }
+        file.sync_all().map_err(|source| AppError::FeatureWrite {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+
+    let file = tmp.persist(path).map_err(|err| AppError::FeatureWrite {
+        path: path.to_path_buf(),
+        source: err.error,
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = file
+            .metadata()
+            .map_err(|source| AppError::FeatureWrite {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .permissions();
+        perms.set_mode(0o600);
+        file.set_permissions(perms)
+            .map_err(|source| AppError::FeatureWrite {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    }
+
+    Ok(())
+}
+
+fn read_enrolled_store(path: &Path) -> AppResult<Vec<EnrolledDescriptor>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = File::open(path).map_err(|source| AppError::FeatureRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let reader = BufReader::new(file);
+    let descriptors: Vec<EnrolledDescriptor> =
+        serde_json::from_reader(reader).map_err(|err| AppError::InvalidFeatureFile {
+            path: path.to_path_buf(),
+            message: format!("invalid feature store contents: {err}"),
+        })?;
+    Ok(descriptors)
+}
+
+fn user_store_path(store_dir: Option<&Path>, user: &str) -> PathBuf {
+    let base = if let Some(dir) = store_dir {
+        dir.to_path_buf()
+    } else if let Ok(env_value) = env::var(FEATURE_STORE_ENV) {
+        PathBuf::from(env_value)
+    } else {
+        PathBuf::from(DEFAULT_STORE_DIR)
+    };
+    base.join(format!("{}.json", user))
+}
+
+fn validate_user_name(user: &str) -> AppResult<()> {
+    if user.is_empty() {
+        return Err(AppError::InvalidUser {
+            user: user.to_string(),
+            message: "user name cannot be empty".into(),
+        });
+    }
+
+    if !user
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(AppError::InvalidUser {
+            user: user.to_string(),
+            message: "use ASCII letters, numbers, '-' or '_' only".into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn map_to_descriptor_validation(path: &Path, err: AppError) -> AppError {
+    match err {
+        AppError::InvalidFeatureFile { message, .. } => AppError::DescriptorValidation {
+            path: path.to_path_buf(),
+            message,
+        },
+        AppError::Serialization(source) => AppError::DescriptorValidation {
+            path: path.to_path_buf(),
+            message: source.to_string(),
+        },
+        other => other,
+    }
 }
 
 fn ensure_valid_faces(faces: &[FaceDescriptorRecord], path: &Path) -> AppResult<usize> {
@@ -618,5 +970,155 @@ mod tests {
             AppError::FeatureRead { path, .. } => assert_eq!(path, missing_target),
             other => panic!("unexpected error: {:?}", other),
         }
+    }
+
+    #[test]
+    fn enroll_creates_store_and_records_ids() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+
+        let descriptor_path = tmp.path().join("faces.json");
+        let summary =
+            summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
+        write_summary(&descriptor_path, &summary);
+        let config = FaceEnrollmentConfig {
+            user: "alice".into(),
+            descriptor: descriptor_path.clone(),
+            store_dir: Some(store_dir.clone()),
+        };
+        let outcome = run_face_enrollment(&config).unwrap();
+        assert_eq!(outcome.added.len(), 2);
+        let store_path = store_dir.join("alice.json");
+        assert_eq!(outcome.store_path, store_path);
+        let written = std::fs::read_to_string(store_path).unwrap();
+        let records: Vec<EnrolledDescriptor> = serde_json::from_str(&written).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].descriptor.len(), 3);
+    }
+
+    #[test]
+    fn enroll_rejects_invalid_user_name() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+
+        let descriptor_path = tmp.path().join("faces.json");
+        let summary = summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5]]);
+        write_summary(&descriptor_path, &summary);
+
+        let config = FaceEnrollmentConfig {
+            user: "alice/bad".into(),
+            descriptor: descriptor_path.clone(),
+            store_dir: Some(store_dir.clone()),
+        };
+        let err = run_face_enrollment(&config).unwrap_err();
+        match err {
+            AppError::InvalidUser { .. } => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn enroll_rejects_empty_descriptor_payload() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+
+        let descriptor_path = tmp.path().join("faces.json");
+        let summary = summary_with_descriptors("input", vec![]);
+        write_summary(&descriptor_path, &summary);
+
+        let config = FaceEnrollmentConfig {
+            user: "alice".into(),
+            descriptor: descriptor_path.clone(),
+            store_dir: Some(store_dir.clone()),
+        };
+        let err = run_face_enrollment(&config).unwrap_err();
+        match err {
+            AppError::DescriptorValidation { .. } => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn remove_descriptor_by_id_updates_store() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+
+        let descriptor_path = tmp.path().join("faces.json");
+        let summary =
+            summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
+        write_summary(&descriptor_path, &summary);
+
+        let enroll_config = FaceEnrollmentConfig {
+            user: "alice".into(),
+            descriptor: descriptor_path.clone(),
+            store_dir: Some(store_dir.clone()),
+        };
+        let outcome = run_face_enrollment(&enroll_config).unwrap();
+        let target_id = outcome.added[0].id.clone();
+
+        let remove_config = FaceRemovalConfig {
+            user: "alice".into(),
+            descriptor_ids: vec![target_id.clone()],
+            remove_all: false,
+            store_dir: Some(store_dir.clone()),
+        };
+        let removal = run_face_removal(&remove_config).unwrap();
+        assert_eq!(removal.removed_ids, vec![target_id]);
+        assert_eq!(removal.remaining, 1);
+
+        let written = std::fs::read_to_string(store_dir.join("alice.json")).unwrap();
+        let records: Vec<EnrolledDescriptor> = serde_json::from_str(&written).unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn remove_unknown_descriptor_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+        let remove_config = FaceRemovalConfig {
+            user: "alice".into(),
+            descriptor_ids: vec!["missing".into()],
+            remove_all: false,
+            store_dir: Some(store_dir.clone()),
+        };
+        let err = run_face_removal(&remove_config).unwrap_err();
+        match err {
+            AppError::DescriptorNotFound { .. } => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn remove_all_clears_store_file() {
+        let tmp = TempDir::new().unwrap();
+        let store_dir = tmp.path().join("store");
+        std::fs::create_dir_all(&store_dir).unwrap();
+
+        let descriptor_path = tmp.path().join("faces.json");
+        let summary = summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5]]);
+        write_summary(&descriptor_path, &summary);
+
+        let enroll_config = FaceEnrollmentConfig {
+            user: "alice".into(),
+            descriptor: descriptor_path.clone(),
+            store_dir: Some(store_dir.clone()),
+        };
+        run_face_enrollment(&enroll_config).unwrap();
+
+        let remove_config = FaceRemovalConfig {
+            user: "alice".into(),
+            descriptor_ids: vec![],
+            remove_all: true,
+            store_dir: Some(store_dir.clone()),
+        };
+        let outcome = run_face_removal(&remove_config).unwrap();
+        assert!(outcome.cleared);
+        assert_eq!(outcome.remaining, 0);
+        assert!(!store_dir.join("alice.json").exists());
     }
 }
