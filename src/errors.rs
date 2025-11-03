@@ -60,6 +60,16 @@ pub enum AppError {
         source: io::Error,
     },
 
+    #[error("failed to read feature file {path}: {source}")]
+    FeatureRead {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("descriptor file {path} is invalid: {message}")]
+    InvalidFeatureFile { path: PathBuf, message: String },
+
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
@@ -75,6 +85,8 @@ impl AppError {
             AppError::DeviceOpen { .. } => ExitCode::from(4),
             AppError::MissingModel { .. } => ExitCode::from(2),
             AppError::ModelLoad { .. } => ExitCode::from(2),
+            AppError::FeatureRead { .. } => ExitCode::from(2),
+            AppError::InvalidFeatureFile { .. } => ExitCode::from(2),
             _ => ExitCode::from(1),
         }
     }

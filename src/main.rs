@@ -13,8 +13,8 @@ use tracing_subscriber::{fmt, EnvFilter};
 use crate::capture::CaptureConfig;
 use crate::cli::{Cli, Commands, FacesCommands, OutputMode};
 use crate::errors::AppError;
-use crate::faces::FaceExtractionConfig;
-use crate::output::{render_error, render_face_success, render_success};
+use crate::faces::{FaceComparisonConfig, FaceExtractionConfig};
+use crate::output::{render_error, render_face_compare, render_face_success, render_success};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -42,6 +42,11 @@ fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
                 let config = FaceExtractionConfig::from(&args);
                 let outcome = faces::run_face_extraction(&config)?;
                 render_face_success(&outcome, mode)?;
+            }
+            FacesCommands::Compare(args) => {
+                let config = FaceComparisonConfig::from(&args);
+                let outcome = faces::run_face_comparison(&config)?;
+                render_face_compare(&outcome, mode)?;
             }
         },
     }

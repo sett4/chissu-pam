@@ -127,6 +127,45 @@ The default output path is `./captures/features/face-features-<timestamp>.json`.
 
 If you encounter build failures referencing `dlib/dnn.h`, install the system development headers mentioned above before running `cargo build` or `cargo test`.
 
+### Face feature comparison
+
+Re-use previously exported descriptor files to compute similarity scores without re-extracting features. Provide one input file and any number of comparison targets:
+
+```bash
+cargo run -- faces compare \
+  --input captures/features/reference.json \
+  --compare-target captures/features/candidate-01.json \
+  --compare-target captures/features/candidate-02.json
+```
+
+Human-oriented output ranks the targets by cosine similarity and highlights the face indices that produced the best match:
+
+```
+Loaded 1 face(s) from captures/features/reference.json
+Similarity metric: cosine
+Target captures/features/candidate-01.json => cosine similarity 0.9234 (input face #0, target face #0)
+Target captures/features/candidate-02.json => cosine similarity 0.8120 (input face #0, target face #1)
+```
+
+Pass `--json` to receive a machine-friendly array:
+
+```bash
+cargo run -- faces compare --input reference.json --compare-target candidate.json --json
+```
+
+```json
+[
+  {
+    "target_path": "candidate.json",
+    "best_similarity": 0.9234,
+    "input_face_index": 0,
+    "target_face_index": 0
+  }
+]
+```
+
+If any descriptor file is missing, unreadable, or contains no faces, the command aborts, prints an error to `stderr`, and exits with status code `2`.
+
 ## Testing
 
 Automated tests exercise frame conversion, JSON serialization, and filesystem handling:

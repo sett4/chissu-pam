@@ -1,0 +1,4 @@
+- [x] Update CLI parsing and routing to add `faces compare` with required arguments.
+- [x] Implement descriptor loading and cosine similarity comparison logic with human and JSON outputs.
+- [x] Handle validation errors for unreadable feature files or missing descriptors.
+- [x] Document command usage and add automated tests covering scoring and error cases.

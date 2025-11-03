@@ -34,6 +34,8 @@ pub enum Commands {
 pub enum FacesCommands {
     /// Extract face descriptors from an existing PNG image
     Extract(FaceExtractArgs),
+    /// Compare face descriptor files produced by the extract command
+    Compare(FaceCompareArgs),
 }
 
 #[derive(Debug, Args)]
@@ -99,6 +101,17 @@ pub struct FaceExtractArgs {
     /// Number of image jitters to run before encoding (controls descriptor stability)
     #[arg(long, default_value_t = 1)]
     pub jitters: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct FaceCompareArgs {
+    /// Path to the descriptor JSON exported by `faces extract`
+    #[arg(long)]
+    pub input: PathBuf,
+
+    /// Descriptor JSON paths to compare against the input (repeatable)
+    #[arg(long = "compare-target", required = true)]
+    pub compare_targets: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
