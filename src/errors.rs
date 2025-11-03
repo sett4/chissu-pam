@@ -1,6 +1,8 @@
 use std::io;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+use image::ImageError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -10,6 +12,16 @@ pub enum AppError {
         device: String,
         #[source]
         source: io::Error,
+    },
+
+    #[error("input file not found or unreadable: {path}")]
+    MissingInput { path: PathBuf },
+
+    #[error("failed to decode image {path}: {source}")]
+    ImageDecode {
+        path: PathBuf,
+        #[source]
+        source: ImageError,
     },
 
     #[error("device capability error: {0}")]
@@ -31,6 +43,23 @@ pub enum AppError {
     #[error("failed processing frame data: {0}")]
     FrameProcessing(String),
 
+    #[error("missing {kind} model; provide {flag} or set ${env}")]
+    MissingModel {
+        kind: &'static str,
+        flag: &'static str,
+        env: &'static str,
+    },
+
+    #[error("failed to load model {path}: {message}")]
+    ModelLoad { path: PathBuf, message: String },
+
+    #[error("failed to write feature output {path}: {source}")]
+    FeatureWrite {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
@@ -38,10 +67,14 @@ pub enum AppError {
 impl AppError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
+            AppError::MissingInput { .. } => ExitCode::from(2),
+            AppError::ImageDecode { .. } => ExitCode::from(2),
             AppError::UnsupportedFormat(_) => ExitCode::from(2),
             AppError::UnsupportedFrameSize { .. } => ExitCode::from(2),
             AppError::Capability(_) => ExitCode::from(3),
             AppError::DeviceOpen { .. } => ExitCode::from(4),
+            AppError::MissingModel { .. } => ExitCode::from(2),
+            AppError::ModelLoad { .. } => ExitCode::from(2),
             _ => ExitCode::from(1),
         }
     }

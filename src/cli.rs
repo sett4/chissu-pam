@@ -25,6 +25,15 @@ pub struct Cli {
 pub enum Commands {
     /// Capture a single frame from an infrared-capable webcam
     Capture(CaptureArgs),
+    /// Operations that work with facial feature extraction pipelines
+    #[command(subcommand)]
+    Faces(FacesCommands),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FacesCommands {
+    /// Extract face descriptors from an existing PNG image
+    Extract(FaceExtractArgs),
 }
 
 #[derive(Debug, Args)]
@@ -68,6 +77,28 @@ pub struct CaptureArgs {
     /// Optional output file path (defaults to captures/<timestamp>.png)
     #[arg(long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct FaceExtractArgs {
+    /// Path to the PNG image that contains one or more faces
+    pub image: PathBuf,
+
+    /// Optional path to the dlib landmark predictor model (falls back to $DLIB_LANDMARK_MODEL)
+    #[arg(long)]
+    pub landmark_model: Option<PathBuf>,
+
+    /// Optional path to the dlib face recognition network (falls back to $DLIB_ENCODER_MODEL)
+    #[arg(long)]
+    pub encoder_model: Option<PathBuf>,
+
+    /// Optional output file for serialized descriptors (defaults to captures/features/<timestamp>.json)
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+
+    /// Number of image jitters to run before encoding (controls descriptor stability)
+    #[arg(long, default_value_t = 1)]
+    pub jitters: u32,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

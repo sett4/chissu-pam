@@ -1,0 +1,6 @@
+- [x] Add `dlib-rs` (and supporting image processing crates if needed) to `Cargo.toml`, ensuring build instructions cover required native assets.
+- [x] Implement a new `study-rust-v4l2 faces extract` subcommand that accepts a PNG path, loads optional model resources, and emits feature encodings via dlib.
+- [x] Persist extracted encodings and face metadata to a user-specified (or default) output file in a documented format (e.g., JSON with vector data).
+- [x] Integrate the command with the existing `--json` flag and structured logging model so both humans and automation can consume the result.
+- [x] Add fixture-based unit/integration tests that exercise successful extraction and error handling without requiring live hardware.
+- [x] Update README (and relevant docs) with usage examples, prerequisites, and testing instructions for the new command.

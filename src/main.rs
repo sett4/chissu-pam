@@ -1,6 +1,7 @@
 mod capture;
 mod cli;
 mod errors;
+mod faces;
 mod output;
 
 use std::process::ExitCode;
@@ -10,9 +11,10 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::capture::CaptureConfig;
-use crate::cli::{Cli, Commands, OutputMode};
+use crate::cli::{Cli, Commands, FacesCommands, OutputMode};
 use crate::errors::AppError;
-use crate::output::{render_error, render_success};
+use crate::faces::FaceExtractionConfig;
+use crate::output::{render_error, render_face_success, render_success};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -35,6 +37,13 @@ fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
             let outcome = capture::run_capture(&config)?;
             render_success(&outcome, mode)?;
         }
+        Commands::Faces(cmd) => match cmd {
+            FacesCommands::Extract(args) => {
+                let config = FaceExtractionConfig::from(&args);
+                let outcome = faces::run_face_extraction(&config)?;
+                render_face_success(&outcome, mode)?;
+            }
+        },
     }
     Ok(())
 }
