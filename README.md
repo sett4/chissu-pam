@@ -213,6 +213,26 @@ cargo run -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./
 
 The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors).
 
+### PAM facial authentication
+
+The repository now ships a PAM module (`libpam_chissuauth.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
+
+- Build the shared library with `cargo build --release -p pam-chissuauth` (or `cargo test -p pam-chissuauth` during development).
+- Place the resulting `target/release/libpam_chissuauth.so` under `/lib/security/` (or your distribution’s PAM module directory), then update `/etc/pam.d/<service>` to include `auth sufficient pam_chissuauth.so` in the desired stack.
+- Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
+  - `similarity_threshold = 0.7`
+  - `capture_timeout_secs = 5`
+  - `frame_interval_millis = 500`
+  - `video_device = "/dev/video0"`
+  - `descriptor_store_dir = "/var/lib/study-rust-v4l2/models"`
+  - `pixel_format = "Y16"`
+  - `warmup_frames = 0`
+  - `jitters = 1`
+- Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissuauth` or `journalctl SYSLOG_IDENTIFIER=pam_chissuauth`.
+- The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
+
+See [`docs/pam-auth.md`](docs/pam-auth.md) for installation walkthroughs, configuration examples, and troubleshooting tips.
+
 ## Testing
 
 Automated tests exercise frame conversion, JSON serialization, and filesystem handling:
