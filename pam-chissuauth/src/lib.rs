@@ -28,7 +28,7 @@ const DEFAULT_THRESHOLD: f64 = 0.7;
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const DEFAULT_INTERVAL_MILLIS: u64 = 500;
 const DEFAULT_VIDEO_DEVICE: &str = "/dev/video0";
-const DEFAULT_STORE_DIR: &str = "/var/lib/study-rust-v4l2/models";
+const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/models";
 const DEFAULT_PIXEL_FORMAT: &str = "Y16";
 const DEFAULT_WARMUP_FRAMES: u32 = 0;
 const DEFAULT_JITTERS: u32 = 1;
@@ -523,6 +523,7 @@ unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chissu_face_core::faces::BoundingBox;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

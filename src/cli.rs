@@ -4,7 +4,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "study-rust-v4l2",
+    name = "chissu-pam",
     about = "Capture infrared frames from V4L2 webcams",
     version
 )]
@@ -127,7 +127,7 @@ pub struct FaceEnrollArgs {
     /// Path to the descriptor JSON exported by `faces extract`
     pub descriptor: PathBuf,
 
-    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/study-rust-v4l2/models)
+    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/chissu-pam/models)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }
@@ -151,7 +151,7 @@ pub struct FaceRemoveArgs {
     #[arg(long)]
     pub all: bool,
 
-    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/study-rust-v4l2/models)
+    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/chissu-pam/models)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }

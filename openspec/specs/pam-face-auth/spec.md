@@ -28,7 +28,7 @@ The module MUST load operational parameters from TOML configuration files and ho
 
 #### Scenario: Defaults applied when no config found
 - **WHEN** neither configuration file is present
-- **THEN** the module uses defaults of threshold `0.7`, timeout `5` seconds, store directory `/var/lib/study-rust-v4l2/models`, and video device `/dev/video0`
+- **THEN** the module uses defaults of threshold `0.7`, timeout `5` seconds, store directory `/var/lib/chissu-pam/models`, and video device `/dev/video0`
 - **AND** it logs the default usage at startup.
 
 ### Requirement: Target User Descriptor Isolation

@@ -1,4 +1,4 @@
-# study-rust-v4l2
+# chissu-pam
 
 A teaching-oriented CLI written in Rust that captures a single infrared frame from a V4L2-compatible webcam and now extracts reusable facial descriptors from existing PNG images. The tool validates device capabilities, negotiates an infrared-friendly pixel format, and saves the frame under `./captures/`. It supports both human-readable logging and a JSON summary for automated workflows.
 
@@ -174,7 +174,7 @@ Register descriptor vectors with a specific Linux user so the planned PAM module
 cargo run -- faces enroll --user alice captures/features/reference.json
 ```
 
-Each descriptor receives a unique identifier and is appended to `/var/lib/study-rust-v4l2/models/alice.json` by default (created automatically with `0600` permissions). The store is a JSON array containing the descriptor vector, bounding box, source file, creation timestamp, and stable ID:
+Each descriptor receives a unique identifier and is appended to `/var/lib/chissu-pam/models/alice.json` by default (created automatically with `0600` permissions). The store is a JSON array containing the descriptor vector, bounding box, source file, creation timestamp, and stable ID:
 
 ```json
 [
@@ -188,7 +188,7 @@ Each descriptor receives a unique identifier and is appended to `/var/lib/study-
 ]
 ```
 
-Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` (or the `STUDY_RUST_V4L2_STORE_DIR` environment variable) if you need the store under an alternate directory for testing or packaging; otherwise the default `/var/lib/study-rust-v4l2/models/` location is used.
+Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` (or the `CHISSU_PAM_STORE_DIR` environment variable) if you need the store under an alternate directory for testing or packaging; otherwise the default `/var/lib/chissu-pam/models/` location is used.
 
 - Missing or unreadable descriptor files exit with status code `2`.
 - Malformed payloads or empty descriptor lists exit with status code `3` and leave the store untouched.
@@ -224,7 +224,7 @@ The repository now ships a PAM module (`libpam_chissuauth.so`) that authenticate
   - `capture_timeout_secs = 5`
   - `frame_interval_millis = 500`
   - `video_device = "/dev/video0"`
-  - `descriptor_store_dir = "/var/lib/study-rust-v4l2/models"`
+  - `descriptor_store_dir = "/var/lib/chissu-pam/models"`
   - `pixel_format = "Y16"`
   - `warmup_frames = 0`
   - `jitters = 1`

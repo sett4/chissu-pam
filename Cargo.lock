@@ -183,6 +183,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "chissu-pam"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chissu-face-core",
+ "chrono",
+ "clap",
+ "dlib-face-recognition",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "v4l",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -905,26 +925,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "study-rust-v4l2"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chissu-face-core",
- "chrono",
- "clap",
- "dlib-face-recognition",
- "image",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "v4l",
-]
 
 [[package]]
 name = "syn"

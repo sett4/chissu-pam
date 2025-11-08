@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [package]
-name = "study-rust-v4l2"
+name = "chissu-pam"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,6 +1,6 @@
 # PAM Facial Authentication Module
 
-The `pam-chissuauth` crate produces `libpam_chissuauth.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `study-rust-v4l2 faces enroll`.
+The `pam-chissuauth` crate produces `libpam_chissuauth.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-pam faces enroll`.
 
 ## Build
 
@@ -27,7 +27,7 @@ The compiled module is located at `target/release/libpam_chissuauth.so`.
    auth include system-local-login
    ```
    Place `pam_chissuauth.so` near the top so a successful match shortcuts the stack. Use `required` instead of `sufficient` if you prefer to keep password fallback.
-3. Ensure `faces enroll` has populated `/var/lib/study-rust-v4l2/models/<user>.json` for every user that should pass facial authentication.
+3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/models/<user>.json` for every user that should pass facial authentication.
 4. Restart services or daemons that cache PAM state if necessary (e.g., `systemctl restart sshd`).
 
 ## Configuration
@@ -39,7 +39,7 @@ similarity_threshold = 0.75     # Float, default 0.7
 capture_timeout_secs = 8        # Integer seconds, default 5
 frame_interval_millis = 300     # Integer ms between samples, default 500
 video_device = "/dev/video2"   # String, default "/dev/video0"
-descriptor_store_dir = "/srv/face-store"  # Path, default "/var/lib/study-rust-v4l2/models"
+descriptor_store_dir = "/srv/face-store"  # Path, default "/var/lib/chissu-pam/models"
 pixel_format = "Y16"            # V4L2 fourcc, default "Y16"
 warmup_frames = 2               # Discarded per-sample warm-up frames, default 0
 jitters = 2                     # Dlib jitter passes, default 1
@@ -73,7 +73,7 @@ Hardware-free integration tests are not included yet; the module expects a real 
 ## Manual verification checklist
 
 1. Enroll descriptors for a test user (`faces enroll --user testuser <descriptor.json>`).
-2. Confirm `/var/lib/study-rust-v4l2/models/testuser.json` exists and contains at least one descriptor.
+2. Confirm `/var/lib/chissu-pam/models/testuser.json` exists and contains at least one descriptor.
 3. Prepare `/etc/chissu-pam/config.toml` with the desired device path and threshold.
 4. Enable the PAM module for a non-critical service (e.g., create `/etc/pam.d/chissu-test` referencing only `pam_chissuauth.so`).
 5. Use `pamtester` or `su testuser -s /bin/bash` to initiate authentication. Watch `journalctl -f -t pam_chissuauth` for log entries:
@@ -92,7 +92,7 @@ Hardware-free integration tests are not included yet; the module expects a real 
 
 ## Security notes
 
-- Keep descriptor stores protected (`0600` is enforced during writes). Apply discretionary access controls if `/var/lib/study-rust-v4l2/models` is relocated.
+- Keep descriptor stores protected (`0600` is enforced during writes). Apply discretionary access controls if `/var/lib/chissu-pam/models` is relocated.
 - Threshold tuning is critical: too low allows false positives, too high increases lockouts.
 - Consider combining the module with a secondary factor (password, token) using the PAM control flags appropriate for your deployment.
 - Monitor syslog for repeated failures—excessive timeouts may indicate camera faults or attempts to spoof the sensor.

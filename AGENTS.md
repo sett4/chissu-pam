@@ -20,7 +20,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
-# study-rust-v4l2 Constitution
+# chissu-pam Constitution
 
 ## Core Principles
 
@@ -64,6 +64,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## 開発ワークフローとレビュー
 
 - すべての変更は `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` をローカルで通したうえでレビューを申請する。
+- PAM モジュール(`pam-chissuauth`)に関わる変更では、レビュー前に必ず `cargo test -p pam-chissuauth` を実行して結果を共有する。
 - PR は CLI 操作例(人間可読 + JSON)と、テストの実行結果ログ(必要ならスクリーンショット)を添付する。
 - ハードウェア依存の変更はレビュワーが再現可能な手順(デバイス設定、照明条件、期待結果)を PR 説明に含める。
 - ドキュメント更新(README, docs/, openspec project)はコード変更と同一 PR で行い、知見の欠落を防ぐ。
