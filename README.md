@@ -231,10 +231,10 @@ When neither command receives `--store-dir`, they inherit the same precedence ch
 
 ### PAM facial authentication
 
-The repository now ships a PAM module (`libpam_chissuauth.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
+The repository now ships a PAM module (`pam_chissu.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
 
-- Build the shared library with `cargo build --release -p pam-chissuauth` (or `cargo test -p pam-chissuauth` during development).
-- Place the resulting `target/release/libpam_chissuauth.so` under `/lib/security/` (or your distribution’s PAM module directory), then update `/etc/pam.d/<service>` to include `auth sufficient pam_chissuauth.so` in the desired stack.
+- Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
+- Place the resulting `target/release/pam_chissu.so` under `/lib/security/` (or your distribution’s PAM module directory), then update `/etc/pam.d/<service>` to include `auth sufficient pam_chissu.so` in the desired stack. A compatibility symlink `libpam_chissuauth.so -> pam_chissu.so` is produced under `target/<profile>/` for packagers that still expect the historical name.
 - Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
   - `similarity_threshold = 0.7`
   - `capture_timeout_secs = 5`
@@ -244,7 +244,7 @@ The repository now ships a PAM module (`libpam_chissuauth.so`) that authenticate
   - `pixel_format = "Y16"`
   - `warmup_frames = 0`
   - `jitters = 1`
-- Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissuauth` or `journalctl SYSLOG_IDENTIFIER=pam_chissuauth`.
+- Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissu` or `journalctl SYSLOG_IDENTIFIER=pam_chissu`.
 - The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
 
 See [`docs/pam-auth.md`](docs/pam-auth.md) for installation walkthroughs, configuration examples, and troubleshooting tips.

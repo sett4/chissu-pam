@@ -126,7 +126,7 @@ impl PamLogger {
         let formatter = Formatter3164 {
             facility: Facility::LOG_AUTHPRIV,
             hostname: None,
-            process: "pam_chissuauth".into(),
+            process: "pam_chissu".into(),
             pid: 0,
         };
         let logger = syslog::unix(formatter.clone()).ok();
@@ -160,7 +160,7 @@ impl PamLogger {
         if let Some(logger) = self.logger.as_mut() {
             let _ = emit(logger, &formatted);
         } else {
-            eprintln!("pam_chissuauth {level}: {formatted}");
+            eprintln!("pam_chissu {level}: {formatted}");
         }
     }
 }

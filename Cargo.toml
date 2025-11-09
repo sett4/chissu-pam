@@ -2,7 +2,7 @@
 members = [
     ".",
     "crates/chissu-face-core",
-    "pam-chissuauth"
+    "pam-chissu"
 ]
 resolver = "2"
 

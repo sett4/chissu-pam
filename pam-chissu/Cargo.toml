@@ -1,10 +1,10 @@
 [package]
-name = "pam-chissuauth"
+name = "pam-chissu"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "pam_chissuauth"
+name = "pam_chissu"
 crate-type = ["cdylib"]
 
 [dependencies]

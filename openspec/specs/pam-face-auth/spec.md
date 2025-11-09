@@ -4,7 +4,7 @@
 TBD - created by archiving change add-pam-face-auth. Update Purpose after archive.
 ## Requirements
 ### Requirement: PAM Facial Authentication Module
-The system MUST provide a shared library `libpam_chissuauth.so` that implements PAM authentication by validating a live camera capture against descriptors enrolled for the target user.
+The system MUST provide a shared library `pam_chissu.so` that implements PAM authentication by validating a live camera capture against descriptors enrolled for the target user.
 
 #### Scenario: Successful match returns PAM success
 - **GIVEN** the invoking PAM stack calls `pam_sm_authenticate`
@@ -40,4 +40,3 @@ The module MUST emit syslog messages for notable events so administrators can in
 #### Scenario: Error conditions logged with context
 - **WHEN** a fatal error occurs during configuration loading, camera access, or descriptor extraction
 - **THEN** the module sends a syslog entry at error severity that includes the PAM service name and relevant error message before returning `PAM_SYSTEM_ERR`.
-
