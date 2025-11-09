@@ -1,6 +1,6 @@
 # PAM Facial Authentication Module
 
-The `pam-chissu` crate produces `pam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-pam faces enroll`.
+The `pam-chissu` crate produces `pam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-cli faces enroll`.
 
 ## Build
 
@@ -51,7 +51,7 @@ Configuration precedence: `/etc/chissu-pam/config.toml` → `/usr/local/etc/chis
 
 If model paths are omitted, the module falls back to the `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` environment variables (the same convention as the CLI).
 
-`chissu-pam faces enroll` and `faces remove` read the same `descriptor_store_dir` key when `--store-dir` is not provided, so CLI enroll/remove operations automatically target the directory configured for the PAM module.
+`chissu-cli faces enroll` and `faces remove` read the same `descriptor_store_dir` key when `--store-dir` is not provided, so CLI enroll/remove operations automatically target the directory configured for the PAM module.
 
 ## Runtime behaviour
 

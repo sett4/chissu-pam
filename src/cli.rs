@@ -7,7 +7,7 @@ pub const DEFAULT_WARMUP_FRAMES: u32 = 4;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "chissu-pam",
+    name = "chissu-cli",
     about = "Capture infrared frames from V4L2 webcams",
     version
 )]

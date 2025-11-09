@@ -76,7 +76,7 @@ By default the CLI discards a handful of warm-up frames so auto exposure can set
 
 ### Config-driven capture defaults
 
-Operators who already maintain `/etc/chissu-pam/config.toml` for the PAM module can reuse the same file to provide CLI defaults. When `chissu-pam capture` is invoked without `--device`, `--pixel-format`, or `--warmup-frames`, the command now consults the config file (falling back to `/usr/local/etc/chissu-pam/config.toml`) before applying the built-in `/dev/video0`, `Y16`, and 4-frame defaults. Built-in defaults are logged explicitly so it is obvious when no config values were found.
+Operators who already maintain `/etc/chissu-pam/config.toml` for the PAM module can reuse the same file to provide CLI defaults. When `chissu-cli capture` is invoked without `--device`, `--pixel-format`, or `--warmup-frames`, the command now consults the config file (falling back to `/usr/local/etc/chissu-pam/config.toml`) before applying the built-in `/dev/video0`, `Y16`, and 4-frame defaults. Built-in defaults are logged explicitly so it is obvious when no config values were found.
 
 Example snippet:
 

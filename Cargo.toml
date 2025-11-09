@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [package]
-name = "chissu-pam"
+name = "chissu-cli"
 version = "0.1.0"
 edition = "2021"
 
