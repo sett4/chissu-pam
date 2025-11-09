@@ -188,7 +188,7 @@ Each descriptor receives a unique identifier and is appended to `/var/lib/chissu
 ]
 ```
 
-Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` (or the `CHISSU_PAM_STORE_DIR` environment variable) if you need the store under an alternate directory for testing or packaging; otherwise the default `/var/lib/chissu-pam/models/` location is used.
+Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` to override the storage directory explicitly. When the flag is omitted, the CLI reads `descriptor_store_dir` from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml`), then consults the `CHISSU_PAM_STORE_DIR` environment variable, and finally falls back to the built-in `/var/lib/chissu-pam/models/` location.
 
 - Missing or unreadable descriptor files exit with status code `2`.
 - Malformed payloads or empty descriptor lists exit with status code `3` and leave the store untouched.
@@ -212,6 +212,8 @@ cargo run -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./
 ```
 
 The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors).
+
+When neither command receives `--store-dir`, they inherit the same precedence chain described for enrollment (config files, then `CHISSU_PAM_STORE_DIR`, then the built-in path), keeping CLI operations aligned with the PAM module configuration.
 
 ### PAM facial authentication
 

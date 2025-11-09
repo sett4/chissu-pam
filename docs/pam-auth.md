@@ -51,6 +51,8 @@ Configuration precedence: `/etc/chissu-pam/config.toml` → `/usr/local/etc/chis
 
 If model paths are omitted, the module falls back to the `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` environment variables (the same convention as the CLI).
 
+`chissu-pam faces enroll` and `faces remove` read the same `descriptor_store_dir` key when `--store-dir` is not provided, so CLI enroll/remove operations automatically target the directory configured for the PAM module.
+
 ## Runtime behaviour
 
 - The module opens the configured V4L2 device for each authentication attempt and captures frames until either:

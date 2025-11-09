@@ -127,7 +127,7 @@ pub struct FaceEnrollArgs {
     /// Path to the descriptor JSON exported by `faces extract`
     pub descriptor: PathBuf,
 
-    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/chissu-pam/models)
+    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }
@@ -151,7 +151,7 @@ pub struct FaceRemoveArgs {
     #[arg(long)]
     pub all: bool,
 
-    /// Optional directory that stores enrolled descriptors (defaults to /var/lib/chissu-pam/models)
+    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }
