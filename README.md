@@ -74,6 +74,20 @@ Example JSON payload:
 
 By default the CLI discards a handful of warm-up frames so auto exposure can settle before saving. Adjust this behavior with `--warmup-frames` if your device needs more (or fewer) frames to stabilize.
 
+### Config-driven capture defaults
+
+Operators who already maintain `/etc/chissu-pam/config.toml` for the PAM module can reuse the same file to provide CLI defaults. When `chissu-pam capture` is invoked without `--device`, `--pixel-format`, or `--warmup-frames`, the command now consults the config file (falling back to `/usr/local/etc/chissu-pam/config.toml`) before applying the built-in `/dev/video0`, `Y16`, and 4-frame defaults. Built-in defaults are logged explicitly so it is obvious when no config values were found.
+
+Example snippet:
+
+```toml
+video_device = "/dev/video2"
+pixel_format = "GREY"
+warmup_frames = 10
+```
+
+With this file in place you can simply run `cargo run -- capture` and the CLI will capture from `/dev/video2` using the GREY pixel format while discarding 10 warm-up frames. Supplying CLI flags still wins over config values when you need to override a setting temporarily.
+
 On failures the command prints a descriptive message to `stderr`. With `--json`, a structured error is emitted on `stdout` and diagnostic hints remain on `stderr`.
 
 ### Face feature extraction

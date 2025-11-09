@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
+pub const DEFAULT_PIXEL_FORMAT: &str = "Y16";
+pub const DEFAULT_WARMUP_FRAMES: u32 = 4;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "chissu-pam",
@@ -48,9 +51,9 @@ pub struct CaptureArgs {
     #[arg(long)]
     pub device: Option<String>,
 
-    /// Requested pixel format FourCC (e.g. Y16, GREY)
-    #[arg(long, default_value = "Y16")]
-    pub pixel_format: String,
+    /// Requested pixel format FourCC (e.g. Y16, GREY). Defaults to config or `Y16`.
+    #[arg(long)]
+    pub pixel_format: Option<String>,
 
     /// Requested frame width
     #[arg(long)]
@@ -76,9 +79,9 @@ pub struct CaptureArgs {
     #[arg(long)]
     pub auto_gain: bool,
 
-    /// Number of warm-up frames to discard before saving the captured image
-    #[arg(long, default_value_t = 4)]
-    pub warmup_frames: u32,
+    /// Number of warm-up frames to discard before saving the captured image. Defaults to config or 4.
+    #[arg(long)]
+    pub warmup_frames: Option<u32>,
 
     /// Optional output file path (defaults to captures/<timestamp>.png)
     #[arg(long)]

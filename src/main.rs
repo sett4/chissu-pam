@@ -11,8 +11,9 @@ use clap::Parser;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
-use crate::capture::CaptureConfig;
-use crate::cli::{Cli, Commands, FacesCommands, OutputMode};
+use crate::cli::{
+    Cli, Commands, FacesCommands, OutputMode, DEFAULT_PIXEL_FORMAT, DEFAULT_WARMUP_FRAMES,
+};
 use crate::config as config_loader;
 use crate::errors::AppError;
 use crate::faces::{
@@ -40,7 +41,28 @@ fn main() -> ExitCode {
 fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
     match cli.command {
         Commands::Capture(args) => {
-            let config = CaptureConfig::from(&args);
+            let capture_defaults = config_loader::load_capture_defaults()?;
+            if args.device.is_none() && capture_defaults.device.is_none() {
+                tracing::info!(
+                    target: "capture.defaults",
+                    "No --device flag or config video_device found; defaulting to /dev/video0"
+                );
+            }
+            if args.pixel_format.is_none() && capture_defaults.pixel_format.is_none() {
+                tracing::info!(
+                    target: "capture.defaults",
+                    "No --pixel-format flag or config pixel_format found; defaulting to {}",
+                    DEFAULT_PIXEL_FORMAT
+                );
+            }
+            if args.warmup_frames.is_none() && capture_defaults.warmup_frames.is_none() {
+                tracing::info!(
+                    target: "capture.defaults",
+                    "No --warmup-frames flag or config warmup_frames found; defaulting to {}",
+                    DEFAULT_WARMUP_FRAMES
+                );
+            }
+            let config = capture::build_capture_config(&args, &capture_defaults);
             let outcome = capture::run_capture(&config)?;
             render_success(&outcome, mode)?;
         }
