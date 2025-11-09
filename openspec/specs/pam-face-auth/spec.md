@@ -21,11 +21,6 @@ The system MUST provide a shared library `libpam_chissuauth.so` that implements 
 ### Requirement: Configurable Similarity And Capture Parameters
 The module MUST load operational parameters from TOML configuration files and honour documented defaults when no configuration file is present.
 
-#### Scenario: Primary configuration file preferred
-- **GIVEN** `/etc/chissu-pam/config.toml` exists
-- **THEN** the module loads similarity threshold, capture timeout (seconds), descriptor store directory, and video device path from this file
-- **AND** only falls back to `/usr/local/etc/chissu-pam/config.toml` when the primary file is absent.
-
 #### Scenario: Defaults applied when no config found
 - **WHEN** neither configuration file is present
 - **THEN** the module uses defaults of threshold `0.7`, timeout `5` seconds, store directory `/var/lib/chissu-pam/models`, and video device `/dev/video0`

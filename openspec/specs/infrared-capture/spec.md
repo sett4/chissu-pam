@@ -12,13 +12,6 @@ The CLI MUST capture a single infrared frame from a V4L2 webcam and save it unde
 - **THEN** the command creates `./captures/<timestamp>.png` containing the captured frame
 - **AND** the command exits with status code 0 after confirming the file path in stdout
 
-#### Scenario: Unsupported format aborts fast
-- **GIVEN** the selected device lacks the requested infrared pixel format
-- **WHEN** the operator runs the command
-- **THEN** the command emits an error explaining the missing format to stderr
-- **AND** no file is written
-- **AND** the process exits with status code 2
-
 ### Requirement: Device Capability Validation
 The CLI MUST interrogate V4L2 capabilities and refuse capture until device features and formats are confirmed.
 
