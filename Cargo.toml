@@ -27,6 +27,4 @@ thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 toml = "0.8"
-
-[patch.crates-io]
-home = { path = "vendor/home/home-0.5.5" }
+home = "0.5.12"
