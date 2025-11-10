@@ -11,6 +11,11 @@ The system MUST provide a shared library `pam_chissu.so` that implements PAM aut
 - **THEN** the build places `pam_chissu.so` under `target/release/`
 - **AND** the library can be copied directly into `/lib/security/pam_chissu.so` without any manual renaming.
 
+#### Scenario: Workspace metadata resolves pam_chissu crate path
+- **WHEN** a maintainer inspects the workspace with `cargo metadata -p pam_chissu`
+- **THEN** Cargo reports the manifest under `crates/pam-chissu/Cargo.toml`
+- **AND** the crate inherits shared metadata (version, edition) from `[workspace.package]` without duplicating those fields.
+
 #### Scenario: Syslog identifier matches module name
 - **WHEN** the PAM stack loads the module and it emits syslog events
 - **THEN** each entry uses the identifier `pam_chissu`
@@ -38,4 +43,3 @@ The module MUST emit syslog messages for notable events so administrators can in
 #### Scenario: Error conditions logged with context
 - **WHEN** a fatal error occurs during configuration loading, camera access, or descriptor extraction
 - **THEN** the module sends a syslog entry at error severity that includes the PAM service name and relevant error message before returning `PAM_SYSTEM_ERR`.
-

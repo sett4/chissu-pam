@@ -200,8 +200,10 @@ impl AuthResult {
     }
 }
 
+/// # Safety
+/// The PAM stack guarantees `pamh` is a valid pointer for the duration of the call.
 #[no_mangle]
-pub extern "C" fn pam_sm_authenticate(
+pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: *mut PamHandle,
     _flags: c_int,
     _argc: c_int,
@@ -261,8 +263,10 @@ pub extern "C" fn pam_sm_authenticate(
     }
 }
 
+/// # Safety
+/// The PAM stack guarantees `pamh` (even if unused) remains a valid pointer for the call duration.
 #[no_mangle]
-pub extern "C" fn pam_sm_setcred(
+pub unsafe extern "C" fn pam_sm_setcred(
     _pamh: *mut PamHandle,
     _flags: c_int,
     _argc: c_int,
@@ -337,9 +341,8 @@ fn authenticate_user(request: &PamRequest, logger: &mut PamLogger) -> PamResult<
                         }
                         if similarity >= config.similarity_threshold {
                             logger.info(&format!(
-                                "Detected matching descriptor (similarity={:.4}) after {} frame(s)",
-                                similarity, frames_captured
-                            ));
+                        "Detected matching descriptor (similarity={similarity:.4}) after {frames_captured} frame(s)"
+                    ));
                             return Ok(AuthResult::success(similarity, frames_captured));
                         }
                     }
@@ -475,12 +478,9 @@ fn try_read_config(path: &str) -> PamResult<Option<ConfigFile>> {
     match fs::read_to_string(path) {
         Ok(contents) => toml::from_str(&contents)
             .map(Some)
-            .map_err(|err| AuthError::Config(format!("Failed to parse {}: {}", path, err))),
+            .map_err(|err| AuthError::Config(format!("Failed to parse {path}: {err}"))),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(AuthError::Config(format!(
-            "Failed to read {}: {}",
-            path, err
-        ))),
+        Err(err) => Err(AuthError::Config(format!("Failed to read {path}: {err}"))),
     }
 }
 
@@ -492,7 +492,7 @@ unsafe fn get_user_name(pamh: *mut PamHandle) -> PamResult<String> {
     let mut ptr: *const c_char = ptr::null();
     let rc = get_user(handle, &mut ptr, ptr::null());
     if rc != PamReturnCode::SUCCESS {
-        return Err(AuthError::Pam(format!("pam_get_user failed: {}", rc)));
+        return Err(AuthError::Pam(format!("pam_get_user failed: {rc}")));
     }
     if ptr.is_null() {
         return Err(AuthError::Pam("pam_get_user returned null".into()));
@@ -509,8 +509,7 @@ unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {
     let rc = get_item(handle, PamItemType::SERVICE, &mut ptr);
     if rc != PamReturnCode::SUCCESS {
         return Err(AuthError::Pam(format!(
-            "pam_get_item(PAM_SERVICE) failed: {}",
-            rc
+            "pam_get_item(PAM_SERVICE) failed: {rc}"
         )));
     }
     if ptr.is_null() {

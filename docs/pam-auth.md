@@ -1,6 +1,6 @@
 # PAM Facial Authentication Module
 
-The `pam-chissu` crate produces `pam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-cli faces enroll`.
+The `pam-chissu` crate (located under `crates/pam-chissu/`) produces `pam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-cli faces enroll`.
 
 ## Build
 

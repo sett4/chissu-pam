@@ -54,3 +54,7 @@ The workspace MUST emit a `chissu-cli` binary for the capture tool whenever the 
 - **THEN** the build outputs `target/debug/chissu-cli`
 - **AND** the binary's `--help` banner introduces the tool as `chissu-cli`.
 
+#### Scenario: Workspace run targets the CLI package
+- **WHEN** a maintainer runs `cargo run -p chissu-cli -- --help` from the repository root
+- **THEN** Cargo resolves the package under `crates/chissu-cli/`
+- **AND** the command prints the CLI usage banner without requiring a legacy root crate.

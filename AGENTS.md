@@ -45,7 +45,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ### IV. テスト可能なキャプチャフローを維持
 
 - `cargo test` で実行可能なユニットテストと、モックまたは録画済みフレームを用いた統合テスト(ハードウェア不要)を必ず用意すること。
-- 実機依存の確認項目(例: 赤外線強度チェック)は `tests/integration/` に手動フラグ付きテストを配置し、実行手順を README に明記すること。
+- 実機依存の確認項目(例: 赤外線強度チェック)はリポジトリ直下の `tests/` (integration) に手動フラグ付きテストを配置し、実行手順を README に明記すること。
   テスト容易性を重視し、学習過程でも機能回帰を防ぐ。
 
 ### V. 学習成果と知見の記録
@@ -61,9 +61,17 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 - IR 対応 Web カメラを前提とし、必要に応じて IR フィルタの有無や外部照射装置をドキュメント化する。
 - 出力ファイルは既定で `./captures/` に保存し、1 ファイルあたり最大 500MB を超えないようローテーションまたは圧縮を検討する。
 
+## ワークスペース構成
+
+- ルートの `Cargo.toml` はワークスペース専用で、`[workspace.package]` に共通メタデータ(edition/version など)を定義する。
+- CLI は `crates/chissu-cli/`、共有ロジックは `crates/chissu-face-core/`、PAM モジュールは `crates/pam-chissu/` に配置する。
+- 各 crate にはローカル `tests/` ディレクトリを用意し、crate 固有のテストは `cargo test -p <crate>` で実行する。
+- 複数 crate を跨ぐ統合テストとフィクスチャはリポジトリ直下の `tests/` に置き、`cargo test --workspace` で実行する。
+- CLI の実行例やドキュメントは `cargo run -p chissu-cli -- <subcommand>` 形式を採用する。
+
 ## 開発ワークフローとレビュー
 
-- すべての変更は `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` をローカルで通したうえでレビューを申請する。
+- すべての変更は `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` をローカルで通し、変更対象 crate については `cargo test -p chissu-cli` / `cargo test -p pam-chissu` / `cargo test -p chissu-face-core` を追加実行したうえでレビューを申請する。
 - PAM モジュール(`pam-chissu`)に関わる変更では、レビュー前に必ず `cargo test -p pam-chissu` を実行して結果を共有する。
 - PR は CLI 操作例(人間可読 + JSON)と、テストの実行結果ログ(必要ならスクリーンショット)を添付する。
 - ハードウェア依存の変更はレビュワーが再現可能な手順(デバイス設定、照明条件、期待結果)を PR 説明に含める。

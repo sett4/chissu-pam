@@ -10,6 +10,22 @@ A teaching-oriented CLI written in Rust that captures a single infrared frame fr
 - System libraries needed by the dlib face-recognition bindings (`libdlib-dev`, `libopenblas-dev`, and `liblapack-dev` on Debian/Ubuntu).
 - Pretrained dlib face models (see [Face feature extraction](#face-feature-extraction)).
 
+## Workspace layout
+
+```
+chissu-pam/
+├── Cargo.toml            # Workspace-only manifest (no root package)
+├── crates/
+│   ├── chissu-cli/        # Binary crate (CLI entrypoint)
+│   ├── chissu-face-core/  # Shared library crate
+│   └── pam-chissu/        # PAM module crate (pam_chissu.so)
+└── tests/                # Cross-crate integration tests/fixtures
+```
+
+- Each crate owns a local `tests/` directory for component-scoped coverage (`cargo test -p <crate>`).
+- Repository-level integration tests that touch multiple crates stay under the top-level `tests/` directory and run via `cargo test --workspace`.
+- All crates inherit shared metadata (version, edition) from `[workspace.package]` in the root manifest, so changes only need to be made once.
+
 ## Building
 
 ```bash
@@ -21,13 +37,13 @@ cargo build
 Capture a frame using default settings:
 
 ```bash
-cargo run -- capture
+cargo run -p chissu-cli -- capture
 ```
 
 Override device path, pixel format, and frame size:
 
 ```bash
-cargo run -- capture \
+cargo run -p chissu-cli -- capture \
   --device /dev/video2 \
   --pixel-format Y16 \
   --width 1280 \
@@ -39,7 +55,7 @@ cargo run -- capture \
 Let the camera negotiate exposure/gain automatically when the device supports it:
 
 ```bash
-cargo run -- capture \
+cargo run -p chissu-cli -- capture \
   --auto-exposure \
   --auto-gain
 ```
@@ -47,7 +63,7 @@ cargo run -- capture \
 Request JSON output suitable for scripting:
 
 ```bash
-cargo run -- capture --json
+cargo run -p chissu-cli -- capture --json
 ```
 
 Example JSON payload:
@@ -86,7 +102,7 @@ pixel_format = "GREY"
 warmup_frames = 10
 ```
 
-With this file in place you can simply run `cargo run -- capture` and the CLI will capture from `/dev/video2` using the GREY pixel format while discarding 10 warm-up frames. Supplying CLI flags still wins over config values when you need to override a setting temporarily.
+With this file in place you can simply run `cargo run -p chissu-cli -- capture` and the CLI will capture from `/dev/video2` using the GREY pixel format while discarding 10 warm-up frames. Supplying CLI flags still wins over config values when you need to override a setting temporarily.
 
 On failures the command prints a descriptive message to `stderr`. With `--json`, a structured error is emitted on `stdout` and diagnostic hints remain on `stderr`.
 
@@ -105,13 +121,13 @@ Run the extractor and direct the descriptors to a file:
 export DLIB_LANDMARK_MODEL=$HOME/models/shape_predictor_68_face_landmarks.dat
 export DLIB_ENCODER_MODEL=$HOME/models/dlib_face_recognition_resnet_model_v1.dat
 
-cargo run -- faces extract captures/sample.png --output captures/features/sample.json
+cargo run -p chissu-cli -- faces extract captures/sample.png --output captures/features/sample.json
 ```
 
 You can override the model resolution per-invocation:
 
 ```bash
-cargo run -- faces extract captures/sample.png \
+cargo run -p chissu-cli -- faces extract captures/sample.png \
   --landmark-model $HOME/models/shape_predictor_68_face_landmarks.dat \
   --encoder-model $HOME/models/dlib_face_recognition_resnet_model_v1.dat \
   --jitters 2
@@ -146,7 +162,7 @@ If you encounter build failures referencing `dlib/dnn.h`, install the system dev
 Re-use previously exported descriptor files to compute similarity scores without re-extracting features. Provide one input file and any number of comparison targets:
 
 ```bash
-cargo run -- faces compare \
+cargo run -p chissu-cli -- faces compare \
   --input captures/features/reference.json \
   --compare-target captures/features/candidate-01.json \
   --compare-target captures/features/candidate-02.json
@@ -164,7 +180,7 @@ Target captures/features/candidate-02.json => cosine similarity 0.8120 (input fa
 Pass `--json` to receive a machine-friendly array:
 
 ```bash
-cargo run -- faces compare --input reference.json --compare-target candidate.json --json
+cargo run -p chissu-cli -- faces compare --input reference.json --compare-target candidate.json --json
 ```
 
 ```json
@@ -185,7 +201,7 @@ If any descriptor file is missing, unreadable, or contains no faces, the command
 Register descriptor vectors with a specific Linux user so the planned PAM module can perform facial authentication. Point the command at a descriptor JSON exported by `faces extract`:
 
 ```bash
-cargo run -- faces enroll --user alice captures/features/reference.json
+cargo run -p chissu-cli -- faces enroll --user alice captures/features/reference.json
 ```
 
 Each descriptor receives a unique identifier and is appended to `/var/lib/chissu-pam/models/alice.json` by default (created automatically with `0600` permissions). The store is a JSON array containing the descriptor vector, bounding box, source file, creation timestamp, and stable ID:
@@ -214,15 +230,15 @@ Remove descriptors from the store when they are no longer valid:
 
 ```bash
 # Remove a specific descriptor by ID
-auth_id=$(cargo run -- faces enroll --user alice captures/features/reference.json --json | jq -r ".added[0].id")
-cargo run -- faces remove --user alice --descriptor-id "$auth_id"
+auth_id=$(cargo run -p chissu-cli -- faces enroll --user alice captures/features/reference.json --json | jq -r ".added[0].id")
+cargo run -p chissu-cli -- faces remove --user alice --descriptor-id "$auth_id"
 
 # Remove every descriptor for a user
-cargo run -- faces remove --user alice --all
+cargo run -p chissu-cli -- faces remove --user alice --all
 
 # Work against a non-default store directory
-cargo run -- faces enroll --user alice --store-dir ./captures/enrolled captures/features/reference.json
-cargo run -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./captures/enrolled
+cargo run -p chissu-cli -- faces enroll --user alice --store-dir ./captures/enrolled captures/features/reference.json
+cargo run -p chissu-cli -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./captures/enrolled
 ```
 
 The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors).
@@ -256,12 +272,12 @@ Automated tests exercise frame conversion, JSON serialization, and filesystem ha
 ```bash
 cargo fmt
 cargo clippy -- -D warnings
-cargo test
+cargo test --workspace
+cargo test -p chissu-cli
+cargo test -p pam_chissu
 ```
 
-Mocked frame data is used so tests do not require live hardware.
-
-`cargo test` requires the dlib headers and libraries listed in the prerequisites. Without them the build for `dlib-face-recognition` will fail during compilation.
+Run `cargo test -p chissu-face-core` when working on the shared library directly. Mocked frame data keeps tests independent of live hardware, but the dlib crates still require the native headers/libraries listed earlier. Without them `dlib-face-recognition` fails to compile.
 
 ## Manual verification with hardware
 

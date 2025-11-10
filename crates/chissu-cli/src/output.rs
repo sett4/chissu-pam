@@ -14,7 +14,7 @@ pub fn render_success(outcome: &CaptureOutcome, mode: OutputMode) -> AppResult<(
     match mode {
         OutputMode::Human => {
             for line in &outcome.logs {
-                println!("{}", line);
+                println!("{line}");
             }
             println!("Capture successful: {}", outcome.summary.output_path);
         }
@@ -33,7 +33,7 @@ pub fn render_face_success(outcome: &FaceExtractionOutcome, mode: OutputMode) ->
     match mode {
         OutputMode::Human => {
             for line in &outcome.logs {
-                println!("{}", line);
+                println!("{line}");
             }
             println!(
                 "Feature extraction successful: {} (faces: {})",
@@ -55,7 +55,7 @@ pub fn render_face_compare(outcome: &FaceComparisonOutcome, mode: OutputMode) ->
     match mode {
         OutputMode::Human => {
             for line in &outcome.logs {
-                println!("{}", line);
+                println!("{line}");
             }
         }
         OutputMode::Json => {
@@ -73,7 +73,7 @@ pub fn render_face_enroll(outcome: &FaceEnrollmentOutcome, mode: OutputMode) -> 
     match mode {
         OutputMode::Human => {
             for line in &outcome.logs {
-                println!("{}", line);
+                println!("{line}");
             }
             println!(
                 "Enrollment successful: {} descriptor(s) added to {}",
@@ -100,7 +100,7 @@ pub fn render_face_remove(outcome: &FaceRemovalOutcome, mode: OutputMode) -> App
     match mode {
         OutputMode::Human => {
             for line in &outcome.logs {
-                println!("{}", line);
+                println!("{line}");
             }
             println!(
                 "Removal successful: removed {} descriptor(s); remaining {}",
@@ -130,7 +130,7 @@ pub fn render_error(err: &AppError, mode: OutputMode) {
         OutputMode::Human => {
             eprintln!("error: {}", err.human_message());
             if let Some(source) = err.source() {
-                eprintln!("cause: {}", source);
+                eprintln!("cause: {source}");
             }
         }
         OutputMode::Json => {
@@ -139,10 +139,10 @@ pub fn render_error(err: &AppError, mode: OutputMode) {
                 "error": err.human_message(),
             });
             if let Ok(json) = serde_json::to_string(&payload) {
-                println!("{}", json);
+                println!("{json}");
             }
             if let Some(source) = err.source() {
-                eprintln!("cause: {}", source);
+                eprintln!("cause: {source}");
             }
         }
     }

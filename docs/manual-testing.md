@@ -11,7 +11,7 @@ Follow this checklist to validate the CLI against a real infrared-capable webcam
 ## Capability sanity check
 
 ```bash
-cargo run -- capture --device /dev/video0 --pixel-format Y16 --width 640 --height 480 --json
+cargo run -p chissu-cli -- capture --device /dev/video0 --pixel-format Y16 --width 640 --height 480 --json
 ```
 
 - Expect a JSON payload with `"success": true` and the negotiated format fields populated.
@@ -20,7 +20,7 @@ cargo run -- capture --device /dev/video0 --pixel-format Y16 --width 640 --heigh
 ## Exposure and gain tuning
 
 ```bash
-cargo run -- capture \
+cargo run -p chissu-cli -- capture \
   --device /dev/video0 \
   --pixel-format Y16 \
   --width 640 --height 480 \
@@ -33,7 +33,7 @@ cargo run -- capture \
 To defer to the camera's automatic controls when available:
 
 ```bash
-cargo run -- capture \
+cargo run -p chissu-cli -- capture \
   --device /dev/video0 \
   --pixel-format Y16 \
   --auto-exposure \
@@ -52,4 +52,4 @@ cargo run -- capture \
 ## Cleanup
 
 - Remove temporary captures if needed: `rm captures/*.png`.
-- Re-run `cargo test` to ensure automated checks still pass after manual scenarios.
+- Re-run `cargo test --workspace` (and targeted `cargo test -p chissu-cli` / `cargo test -p pam_chissu` if you touched those crates) to ensure automated checks still pass after manual scenarios.
