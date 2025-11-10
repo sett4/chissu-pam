@@ -1,0 +1,16 @@
+[package]
+name = "chissu-face-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+v4l = "0.14"
+image = { version = "0.24", default-features = false, features = ["png"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dlib-face-recognition = "0.3"
+tracing = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+thiserror = "1.0"
