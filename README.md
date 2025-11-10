@@ -1,6 +1,8 @@
 # chissu-pam
 
-A teaching-oriented CLI written in Rust that captures a single infrared frame from a V4L2-compatible webcam and now extracts reusable facial descriptors from existing PNG images. The tool validates device capabilities, negotiates an infrared-friendly pixel format, and saves the frame under `./captures/`. It supports both human-readable logging and a JSON summary for automated workflows.
+chissu-pam is an open-source, face-recognition-driven Pluggable Authentication Module (PAM) that pairs a Rust CLI with shared libraries to enroll and verify users via infrared-friendly V4L2 webcams. The workspace explores a reproducible workflow that captures frames, derives reusable feature vectors, and wires those descriptors into PAM conversations for experimental login flows.
+
+This repository is in an early, exploratory phase: interfaces move quickly, persistence formats may break, and the security surface has not been formally audited. Treat every component as pre-production, review the code before deploying to sensitive systems, and expect rough edges as the project evolves.
 
 ## Prerequisites
 
