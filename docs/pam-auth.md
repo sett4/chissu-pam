@@ -1,32 +1,36 @@
 # PAM Facial Authentication Module
 
-The `pam-chissu` crate (located under `crates/pam-chissu/`) produces `pam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-cli faces enroll`.
+The `pam-chissu` crate (located under `crates/pam-chissu/`) produces `libpam_chissu.so`, a PAM authentication module that accepts a user only when a live camera capture matches facial descriptors previously enrolled with `chissu-cli faces enroll`.
 
 ## Build
 
 ```bash
-# Build the shared library (generates pam_chissu.so plus legacy symlink)
+# Build the shared library
 cargo build --release -p pam-chissu
 
 # Run unit tests (mocks only; no webcam required)
 cargo test -p pam-chissu
 ```
 
-The compiled module is located at `target/release/pam_chissu.so`. A compatibility symlink `libpam_chissuauth.so -> pam_chissu.so` is emitted in the same directory for one release cycle so existing deployment scripts continue to work.
+The compiled module is located at `target/release/libpam_chissu.so`; copy it directly into `/lib/security/`:
+
+```bash
+sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
+```
 
 ## Installation overview
 
 1. Copy the shared library into your PAM module directory (usually `/lib/security/` on Debian/Ubuntu):
    ```bash
-   sudo install -m 0644 target/release/pam_chissu.so /lib/security/
+   sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
    ```
 2. Configure the service stack (example for `login`):
    ```pam
    # /etc/pam.d/login
-   auth sufficient pam_chissu.so
+   auth sufficient libpam_chissu.so
    auth include system-local-login
    ```
-   Place `pam_chissu.so` near the top so a successful match shortcuts the stack. Use `required` instead of `sufficient` if you prefer to keep password fallback.
+   Place `libpam_chissu.so` near the top so a successful match shortcuts the stack. Use `required` instead of `sufficient` if you prefer to keep password fallback.
 3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/models/<user>.json` for every user that should pass facial authentication.
 4. Restart services or daemons that cache PAM state if necessary (e.g., `systemctl restart sshd`).
 
@@ -77,7 +81,7 @@ Hardware-free integration tests are not included yet; the module expects a real 
 1. Enroll descriptors for a test user (`faces enroll --user testuser <descriptor.json>`).
 2. Confirm `/var/lib/chissu-pam/models/testuser.json` exists and contains at least one descriptor.
 3. Prepare `/etc/chissu-pam/config.toml` with the desired device path and threshold.
-4. Enable the PAM module for a non-critical service (e.g., create `/etc/pam.d/chissu-test` referencing only `pam_chissu.so`).
+4. Enable the PAM module for a non-critical service (e.g., create `/etc/pam.d/chissu-test` referencing only `libpam_chissu.so`).
 5. Use `pamtester` or `su testuser -s /bin/bash` to initiate authentication. Watch `journalctl -f -t pam_chissu` for log entries:
    - `Starting face authentication...`
    - `Detected matching descriptor...` or `Authentication failed: ...`

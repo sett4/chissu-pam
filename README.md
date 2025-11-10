@@ -18,7 +18,7 @@ chissu-pam/
 ├── crates/
 │   ├── chissu-cli/        # Binary crate (CLI entrypoint)
 │   ├── chissu-face-core/  # Shared library crate
-│   └── pam-chissu/        # PAM module crate (pam_chissu.so)
+│   └── pam-chissu/        # PAM module crate (libpam_chissu.so)
 └── tests/                # Cross-crate integration tests/fixtures
 ```
 
@@ -247,10 +247,10 @@ When neither command receives `--store-dir`, they inherit the same precedence ch
 
 ### PAM facial authentication
 
-The repository now ships a PAM module (`pam_chissu.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
+The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
 
 - Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
-- Place the resulting `target/release/pam_chissu.so` under `/lib/security/` (or your distribution’s PAM module directory), then update `/etc/pam.d/<service>` to include `auth sufficient pam_chissu.so` in the desired stack. A compatibility symlink `libpam_chissuauth.so -> pam_chissu.so` is produced under `target/<profile>/` for packagers that still expect the historical name.
+- Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so`) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
 - Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
   - `similarity_threshold = 0.7`
   - `capture_timeout_secs = 5`

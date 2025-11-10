@@ -4,22 +4,22 @@
 TBD - created by archiving change add-pam-face-auth. Update Purpose after archive.
 ## Requirements
 ### Requirement: PAM Facial Authentication Module
-The system MUST provide a shared library `pam_chissu.so` that implements PAM authentication by validating a live camera capture against descriptors enrolled for the target user.
+The system MUST provide a shared library for PAM authentication named `libpam_chissu.so`, validating a live camera capture against descriptors enrolled for the target user.
 
-#### Scenario: Build target renamed to pam_chissu
+#### Scenario: Build emits libpam_chissu artefact
 - **WHEN** a maintainer runs `cargo build --release -p pam_chissu` (or the equivalent `cargo build -d pam_chissu` shortcut)
-- **THEN** the build places `pam_chissu.so` under `target/release/`
-- **AND** the library can be copied directly into `/lib/security/pam_chissu.so` without any manual renaming.
-
-#### Scenario: Workspace metadata resolves pam_chissu crate path
-- **WHEN** a maintainer inspects the workspace with `cargo metadata -p pam_chissu`
-- **THEN** Cargo reports the manifest under `crates/pam-chissu/Cargo.toml`
-- **AND** the crate inherits shared metadata (version, edition) from `[workspace.package]` without duplicating those fields.
+- **THEN** the build places `libpam_chissu.so` under `target/release/`
+- **AND** maintainers copy that exact filename into `/lib/security/` without relying on auxiliary compatibility symlinks.
 
 #### Scenario: Syslog identifier matches module name
 - **WHEN** the PAM stack loads the module and it emits syslog events
 - **THEN** each entry uses the identifier `pam_chissu`
 - **SO** operators can follow the docs exactly when filtering events via `journalctl -t pam_chissu` or configuring PAM service stanzas like `auth sufficient pam_chissu.so`.
+
+#### Scenario: Legacy libpam artefacts removed
+- **WHEN** a maintainer inspects `target/<profile>/` after running `cargo build --release -p pam-chissu`
+- **THEN** the directory contains `libpam_chissu.so` (and Cargo’s usual metadata files) but **NOT** `libpam_chissuauth.so`
+- **SO** installation and packaging steps always pick the single supported module name without relying on deprecated symlinks.
 
 ### Requirement: Configurable Similarity And Capture Parameters
 The module MUST load operational parameters from TOML configuration files and honour documented defaults when no configuration file is present.
@@ -43,3 +43,4 @@ The module MUST emit syslog messages for notable events so administrators can in
 #### Scenario: Error conditions logged with context
 - **WHEN** a fatal error occurs during configuration loading, camera access, or descriptor extraction
 - **THEN** the module sends a syslog entry at error severity that includes the PAM service name and relevant error message before returning `PAM_SYSTEM_ERR`.
+
