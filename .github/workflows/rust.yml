@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install Dllib
+      run: apt-get install libdlib-dev libopenblas-dev liblapack-dev
     - name: Build
       run: cargo build --verbose --workspace
     - name: Run tests
