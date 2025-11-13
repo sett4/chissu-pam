@@ -71,6 +71,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 ## 開発ワークフローとレビュー
 
+- cargo を実行する場合は `CARGO_HOME="$(pwd)/.cargo-home" cargo build` のように CARGO_HOME を追加してください。なぜならデフォルトではワークスペースの外だから書き込みできません。
 - すべての変更は `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` をローカルで通し、変更対象 crate については `cargo test -p chissu-cli` / `cargo test -p pam-chissu` / `cargo test -p chissu-face-core` を追加実行したうえでレビューを申請する。
 - PAM モジュール(`pam-chissu`)に関わる変更では、レビュー前に必ず `cargo test -p pam-chissu` を実行して結果を共有する。
 - PR は CLI 操作例(人間可読 + JSON)と、テストの実行結果ログ(必要ならスクリーンショット)を添付する。

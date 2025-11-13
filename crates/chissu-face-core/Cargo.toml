@@ -14,3 +14,4 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 thiserror = "1.0"
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }

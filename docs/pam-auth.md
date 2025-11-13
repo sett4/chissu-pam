@@ -47,6 +47,7 @@ descriptor_store_dir = "/srv/face-store"  # Path, default "/var/lib/chissu-pam/m
 pixel_format = "Y16"            # V4L2 fourcc, default "Y16"
 warmup_frames = 2               # Discarded per-sample warm-up frames, default 0
 jitters = 2                     # Dlib jitter passes, default 1
+require_secret_service = false  # Opt-in to enforcing keyring availability before capture
 landmark_model = "/opt/dlib/shape_predictor_68_face_landmarks.dat"
 encoder_model = "/opt/dlib/dlib_face_recognition_resnet_model_v1.dat"
 ```
@@ -56,6 +57,18 @@ Configuration precedence: `/etc/chissu-pam/config.toml` → `/usr/local/etc/chis
 If model paths are omitted, the module falls back to the `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` environment variables (the same convention as the CLI).
 
 `chissu-cli faces enroll` and `faces remove` read the same `descriptor_store_dir` key when `--store-dir` is not provided, so CLI enroll/remove operations automatically target the directory configured for the PAM module.
+
+## Secret Service prerequisite
+
+`pam_chissu` verifies the per-user Secret Service (GNOME Keyring) session before attempting any capture. The module creates a temporary entry via the `keyring` crate and treats `NoEntry` as success (keyring reachable) so no secrets need to exist up-front. If the keyring daemon is locked, the DBus session is absent, or Secret Service returns a platform error, the module logs the reason, notifies the PAM conversation that face authentication is being skipped, and returns `PAM_IGNORE`. This allows downstream modules (password, hardware tokens, etc.) to continue without delay while ensuring future descriptor encryption work can rely on an unlocked keyring.
+
+Run `chissu-cli keyring check` (add `--json` for machine parsing) to exercise the same probe outside of PAM before modifying service stacks. Flip `require_secret_service = true` in the config to enforce the guard inside PAM once your environment has a working Secret Service; it defaults to `false` for compatibility with headless or console-only setups.
+
+Troubleshooting tips:
+
+- Ensure a session bus and `gnome-keyring-daemon` (or compatible Secret Service implementation) are running for the target user before PAM attempts begin.
+- When testing via `pamtester` or SSH, forward the DBus session variables (e.g., `DBUS_SESSION_BUS_ADDRESS`) or rely on a display manager that exports them automatically.
+- Review `journalctl -t pam_chissu` for messages such as `Secret Service unavailable; skipping face authentication` to confirm the guard triggered and understand the underlying error reported by the keyring crate.
 
 ## Runtime behaviour
 

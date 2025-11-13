@@ -31,6 +31,9 @@ pub enum Commands {
     /// Operations that work with facial feature extraction pipelines
     #[command(subcommand)]
     Faces(FacesCommands),
+    /// Inspect Secret Service / keyring integration
+    #[command(subcommand)]
+    Keyring(KeyringCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -44,6 +47,15 @@ pub enum FacesCommands {
     /// Remove descriptors from a per-user feature store
     Remove(FaceRemoveArgs),
 }
+
+#[derive(Debug, Subcommand)]
+pub enum KeyringCommands {
+    /// Check whether Secret Service is available for the current user
+    Check(KeyringCheckArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct KeyringCheckArgs {}
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {

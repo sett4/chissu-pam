@@ -14,6 +14,9 @@ use chissu_face_core::faces::{
     cosine_similarity, load_enrolled_descriptors, validate_user_name, DlibBackend,
     EnrolledDescriptor, FaceEmbeddingBackend, FaceExtractionConfig,
 };
+use chissu_face_core::secret_service::{
+    default_service_name, ensure_secret_service_available, KeyringSecretServiceProbe,
+};
 use image::{Rgb, RgbImage};
 use libc::{c_int, free};
 use pam_sys::{
@@ -45,6 +48,8 @@ enum AuthError {
     Pam(String),
     #[error(transparent)]
     Core(#[from] AppError),
+    #[error("Secret Service unavailable: {0}")]
+    SecretServiceUnavailable(String),
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -59,6 +64,7 @@ struct ConfigFile {
     jitters: Option<u32>,
     landmark_model: Option<PathBuf>,
     encoder_model: Option<PathBuf>,
+    require_secret_service: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +79,7 @@ struct ResolvedConfig {
     jitters: u32,
     landmark_model: Option<PathBuf>,
     encoder_model: Option<PathBuf>,
+    require_secret_service: bool,
 }
 
 impl ResolvedConfig {
@@ -100,6 +107,7 @@ impl ResolvedConfig {
             jitters: raw.jitters.unwrap_or(DEFAULT_JITTERS),
             landmark_model: raw.landmark_model,
             encoder_model: raw.encoder_model,
+            require_secret_service: raw.require_secret_service.unwrap_or(false),
         }
     }
 }
@@ -340,6 +348,16 @@ pub unsafe extern "C" fn pam_sm_authenticate(
 
     let outcome = match authenticate_user(&request, &mut logger, &mut messenger) {
         Ok(result) => result,
+        Err(AuthError::SecretServiceUnavailable(reason)) => {
+            let message =
+                format!("Secret Service unavailable; skipping face authentication: {reason}");
+            logger.warn(&message);
+            messenger.send_error_msg(
+                &mut logger,
+                &format!("Secret Service unavailable ({reason}); skipping face authentication.",),
+            );
+            return PamReturnCode::IGNORE as c_int;
+        }
         Err(err) => {
             logger.error(&format!("Authentication aborted: {err}"));
             return PamReturnCode::SYSTEM_ERR as c_int;
@@ -419,6 +437,18 @@ fn authenticate_user(
         logger.info(&format!("Loaded configuration from {}", path.display()));
     } else {
         logger.info("No configuration file found; using built-in defaults");
+    }
+
+    if config.require_secret_service {
+        ensure_secret_service_available(&KeyringSecretServiceProbe, &request.user)
+            .map_err(|err| AuthError::SecretServiceUnavailable(err.to_string()))?;
+        logger.info(&format!(
+            "Secret Service available for user '{}' via service '{}' — proceeding with capture",
+            request.user,
+            default_service_name(),
+        ));
+    } else {
+        logger.info("Secret Service probe disabled via configuration; continuing without check");
     }
 
     let descriptors =
@@ -715,6 +745,7 @@ mod tests {
             loaded.descriptor_store_dir,
             PathBuf::from(DEFAULT_STORE_DIR)
         );
+        assert!(!loaded.require_secret_service);
     }
 
     #[test]
@@ -804,6 +835,17 @@ mod tests {
         let resolved = ResolvedConfig::from_raw(raw);
         assert_eq!(resolved.similarity_threshold, 0.8);
         assert_eq!(resolved.video_device, "/dev/video5");
+    }
+
+    #[test]
+    fn try_read_config_disables_secret_service_when_requested() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "require_secret_service = false").unwrap();
+        let raw = try_read_config(file.path().to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        let resolved = ResolvedConfig::from_raw(raw);
+        assert!(!resolved.require_secret_service);
     }
 
     #[test]

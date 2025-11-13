@@ -5,6 +5,8 @@ use std::process::ExitCode;
 use image::ImageError;
 use thiserror::Error;
 
+use crate::secret_service::SecretServiceError;
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("failed to open video device {device}: {source}")]
@@ -91,6 +93,13 @@ pub enum AppError {
 
     #[error("invalid configuration file {path}: {message}")]
     ConfigParse { path: PathBuf, message: String },
+
+    #[error("Secret Service unavailable for user {user} (service {service}): {message}")]
+    SecretServiceUnavailable {
+        user: String,
+        service: String,
+        message: String,
+    },
 }
 
 impl AppError {
@@ -111,6 +120,7 @@ impl AppError {
             AppError::DescriptorNotFound { .. } => ExitCode::from(4),
             AppError::ConfigRead { .. } => ExitCode::from(2),
             AppError::ConfigParse { .. } => ExitCode::from(2),
+            AppError::SecretServiceUnavailable { .. } => ExitCode::from(2),
             _ => ExitCode::from(1),
         }
     }
@@ -121,3 +131,13 @@ impl AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+impl From<SecretServiceError> for AppError {
+    fn from(err: SecretServiceError) -> Self {
+        AppError::SecretServiceUnavailable {
+            user: err.user().to_string(),
+            service: err.service().to_string(),
+            message: err.message().to_string(),
+        }
+    }
+}

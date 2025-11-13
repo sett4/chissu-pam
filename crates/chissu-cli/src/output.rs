@@ -9,6 +9,7 @@ use crate::errors::{AppError, AppResult};
 use crate::faces::{
     FaceComparisonOutcome, FaceEnrollmentOutcome, FaceExtractionOutcome, FaceRemovalOutcome,
 };
+use crate::keyring::KeyringCheckSummary;
 
 pub fn render_success(outcome: &CaptureOutcome, mode: OutputMode) -> AppResult<()> {
     match mode {
@@ -126,6 +127,31 @@ pub fn render_face_remove(outcome: &FaceRemovalOutcome, mode: OutputMode) -> App
 }
 
 pub fn render_error(err: &AppError, mode: OutputMode) {
+    if let AppError::SecretServiceUnavailable {
+        user,
+        service,
+        message,
+    } = err
+    {
+        match mode {
+            OutputMode::Human => {
+                eprintln!(
+                    "Secret Service unavailable for user '{user}' (service '{service}'): {message}"
+                );
+            }
+            OutputMode::Json => {
+                let payload = json!({
+                    "status": "error",
+                    "user": user,
+                    "service": service,
+                    "error": message,
+                });
+                println!("{payload}");
+            }
+        }
+        return;
+    }
+
     match mode {
         OutputMode::Human => {
             eprintln!("error: {}", err.human_message());
@@ -146,4 +172,27 @@ pub fn render_error(err: &AppError, mode: OutputMode) {
             }
         }
     }
+}
+
+pub fn render_keyring_check(summary: &KeyringCheckSummary, mode: OutputMode) -> AppResult<()> {
+    match mode {
+        OutputMode::Human => {
+            println!(
+                "Secret Service available for user '{}' (service '{}')",
+                summary.user, summary.service
+            );
+        }
+        OutputMode::Json => {
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let payload = serde_json::to_string(&json!({
+                "status": "ok",
+                "user": summary.user,
+                "service": summary.service,
+            }))?;
+            handle.write_all(payload.as_bytes())?;
+            handle.write_all(b"\n")?;
+        }
+    }
+    Ok(())
 }

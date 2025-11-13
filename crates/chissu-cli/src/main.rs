@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod errors;
 mod faces;
+mod keyring;
 mod output;
 
 use std::process::ExitCode;
@@ -12,7 +13,8 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::cli::{
-    Cli, Commands, FacesCommands, OutputMode, DEFAULT_PIXEL_FORMAT, DEFAULT_WARMUP_FRAMES,
+    Cli, Commands, FacesCommands, KeyringCommands, OutputMode, DEFAULT_PIXEL_FORMAT,
+    DEFAULT_WARMUP_FRAMES,
 };
 use crate::config as config_loader;
 use crate::errors::AppError;
@@ -89,6 +91,9 @@ fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
                 let outcome = faces::run_face_removal(&config)?;
                 render_face_remove(&outcome, mode)?;
             }
+        },
+        Commands::Keyring(cmd) => match cmd {
+            KeyringCommands::Check(_) => keyring::run_keyring_check(mode)?,
         },
     }
     Ok(())
