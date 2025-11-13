@@ -1,9 +1,10 @@
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr, CString};
 use std::fs;
 use std::io;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::ptr;
+use std::slice;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -14,8 +15,11 @@ use chissu_face_core::faces::{
     EnrolledDescriptor, FaceEmbeddingBackend, FaceExtractionConfig,
 };
 use image::{Rgb, RgbImage};
-use libc::c_int;
-use pam_sys::{get_item, get_user, PamHandle, PamItemType, PamReturnCode};
+use libc::{c_int, free};
+use pam_sys::{
+    get_item, get_user, ConvClosure, PamConversation, PamHandle, PamItemType, PamMessage,
+    PamMessageStyle, PamResponse, PamReturnCode,
+};
 use serde::Deserialize;
 use syslog::{Facility, Formatter3164, Logger, LoggerBackend};
 use thiserror::Error;
@@ -114,6 +118,106 @@ struct LoadedConfig {
 #[derive(Debug)]
 struct PamRequest {
     user: String,
+}
+
+struct PamConversationMessenger {
+    conv: Option<ConvClosure>,
+    data_ptr: *mut c_void,
+}
+
+impl PamConversationMessenger {
+    unsafe fn new(pamh: *mut PamHandle, logger: &mut PamLogger) -> Self {
+        if pamh.is_null() {
+            logger.warn("PAM handle was null; conversation messages disabled");
+            return Self::without_callback();
+        }
+
+        let handle = &*pamh;
+        let mut ptr: *const c_void = ptr::null();
+        let rc = get_item(handle, PamItemType::CONV, &mut ptr);
+        if rc != PamReturnCode::SUCCESS {
+            logger.warn(&format!("pam_get_item(PAM_CONV) failed: {rc}"));
+            return Self::without_callback();
+        }
+        if ptr.is_null() {
+            logger.warn("PAM provided no conversation struct; interactive hints disabled");
+            return Self::without_callback();
+        }
+
+        let conv_struct = &*(ptr as *const PamConversation);
+        match conv_struct.conv {
+            Some(callback) => Self {
+                conv: Some(callback),
+                data_ptr: conv_struct.data_ptr,
+            },
+            None => {
+                logger
+                    .warn("PAM conversation struct lacked a callback; interactive hints disabled");
+                Self::without_callback()
+            }
+        }
+    }
+
+    fn without_callback() -> Self {
+        Self {
+            conv: None,
+            data_ptr: ptr::null_mut(),
+        }
+    }
+
+    fn send_text_info(&mut self, logger: &mut PamLogger, message: &str) {
+        self.send(logger, PamMessageStyle::TEXT_INFO, message);
+    }
+
+    fn send_error_msg(&mut self, logger: &mut PamLogger, message: &str) {
+        self.send(logger, PamMessageStyle::ERROR_MSG, message);
+    }
+
+    fn send(&mut self, logger: &mut PamLogger, style: PamMessageStyle, message: &str) {
+        let callback = match self.conv {
+            Some(conv) => conv,
+            None => return,
+        };
+
+        let Ok(c_message) = CString::new(message) else {
+            logger.warn("PAM conversation message contained an interior null byte; skipped");
+            return;
+        };
+
+        let mut pam_message = PamMessage {
+            msg_style: style as c_int,
+            msg: c_message.as_ptr(),
+        };
+        let mut pam_message_ptr: *mut PamMessage = &mut pam_message;
+        let mut response_ptr: *mut PamResponse = ptr::null_mut();
+        let status = callback(1, &mut pam_message_ptr, &mut response_ptr, self.data_ptr);
+        unsafe {
+            if !response_ptr.is_null() {
+                let responses = slice::from_raw_parts_mut(response_ptr, 1);
+                for response in responses {
+                    if !response.resp.is_null() {
+                        free(response.resp as *mut c_void);
+                    }
+                }
+                free(response_ptr as *mut c_void);
+            }
+        }
+
+        if status != PamReturnCode::SUCCESS as c_int {
+            let code = PamReturnCode::from(status);
+            logger.warn(&format!(
+                "PAM conversation callback returned {code:?} while sending {style:?}"
+            ));
+        }
+    }
+
+    #[cfg(test)]
+    fn from_callback(callback: ConvClosure) -> Self {
+        Self {
+            conv: Some(callback),
+            data_ptr: ptr::null_mut(),
+        }
+    }
 }
 
 struct PamLogger {
@@ -226,13 +330,15 @@ pub unsafe extern "C" fn pam_sm_authenticate(
         }
     };
 
+    let mut messenger = PamConversationMessenger::new(pamh, &mut logger);
+
     let request = PamRequest { user };
     logger.info(&format!(
         "Starting face authentication for user '{}'.",
         request.user
     ));
 
-    let outcome = match authenticate_user(&request, &mut logger) {
+    let outcome = match authenticate_user(&request, &mut logger, &mut messenger) {
         Ok(result) => result,
         Err(err) => {
             logger.error(&format!("Authentication aborted: {err}"));
@@ -245,6 +351,13 @@ pub unsafe extern "C" fn pam_sm_authenticate(
             "Authentication success (frames={}, best_similarity={:.4}).",
             outcome.frames_captured, outcome.best_similarity
         ));
+        messenger.send_text_info(
+            &mut logger,
+            &format!(
+                "Face authentication succeeded for user '{}' via service '{}'.",
+                request.user, service
+            ),
+        );
         PamReturnCode::SUCCESS as c_int
     } else {
         let reason = match outcome
@@ -259,6 +372,22 @@ pub unsafe extern "C" fn pam_sm_authenticate(
             "Authentication failed: {} (frames={}, best_similarity={:.4}).",
             reason, outcome.frames_captured, outcome.best_similarity
         ));
+        let prompt = match outcome
+            .failure_reason
+            .unwrap_or(FailureReason::ThresholdNotReached)
+        {
+            FailureReason::DescriptorsMissing => format!(
+                "Face authentication unavailable: no enrolled descriptors for '{}'.",
+                request.user
+            ),
+            FailureReason::NoFaceDetected => {
+                "No face detected before timeout; stay in frame and retry.".to_string()
+            }
+            FailureReason::ThresholdNotReached => {
+                "Face detected but similarity below threshold; please retry.".to_string()
+            }
+        };
+        messenger.send_error_msg(&mut logger, &prompt);
         PamReturnCode::AUTH_ERR as c_int
     }
 }
@@ -275,7 +404,11 @@ pub unsafe extern "C" fn pam_sm_setcred(
     PamReturnCode::SUCCESS as c_int
 }
 
-fn authenticate_user(request: &PamRequest, logger: &mut PamLogger) -> PamResult<AuthResult> {
+fn authenticate_user(
+    request: &PamRequest,
+    logger: &mut PamLogger,
+    messenger: &mut PamConversationMessenger,
+) -> PamResult<AuthResult> {
     validate_user_name(&request.user)?;
 
     let LoadedConfig {
@@ -307,6 +440,7 @@ fn authenticate_user(request: &PamRequest, logger: &mut PamLogger) -> PamResult<
     let mut frames_captured = 0usize;
     let mut best_similarity = f64::NEG_INFINITY;
     let mut detected_any_face = false;
+    let mut retry_hint_sent = false;
 
     while Instant::now() < deadline {
         frames_captured += 1;
@@ -324,6 +458,13 @@ fn authenticate_user(request: &PamRequest, logger: &mut PamLogger) -> PamResult<
                 let faces = embedder.extract(&rgb, config.jitters)?;
                 if faces.is_empty() {
                     logger.debug("No faces detected in frame");
+                    if !retry_hint_sent {
+                        messenger.send_error_msg(
+                            logger,
+                            "No face detected yet; align with the camera while we retry...",
+                        );
+                        retry_hint_sent = true;
+                    }
                 } else {
                     detected_any_face = true;
                     for rec in faces {
@@ -523,8 +664,38 @@ unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {
 mod tests {
     use super::*;
     use chissu_face_core::faces::BoundingBox;
+    use std::ffi::CStr;
     use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::NamedTempFile;
+
+    static CONV_LOG: OnceLock<Mutex<Vec<(PamMessageStyle, String)>>> = OnceLock::new();
+
+    fn conversation_log() -> &'static Mutex<Vec<(PamMessageStyle, String)>> {
+        CONV_LOG.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    extern "C" fn recording_conv(
+        num_msg: c_int,
+        msg: *mut *mut PamMessage,
+        resp: *mut *mut PamResponse,
+        _data: *mut c_void,
+    ) -> c_int {
+        assert_eq!(num_msg, 1);
+        unsafe {
+            let message_ptr = *msg;
+            assert!(!message_ptr.is_null());
+            let style = PamMessageStyle::from((*message_ptr).msg_style as i32);
+            let text = CStr::from_ptr((*message_ptr).msg)
+                .to_string_lossy()
+                .into_owned();
+            conversation_log().lock().unwrap().push((style, text));
+            if !resp.is_null() {
+                *resp = ptr::null_mut();
+            }
+        }
+        PamReturnCode::SUCCESS as c_int
+    }
 
     #[test]
     fn resolved_config_defaults() {
@@ -633,5 +804,22 @@ mod tests {
         let resolved = ResolvedConfig::from_raw(raw);
         assert_eq!(resolved.similarity_threshold, 0.8);
         assert_eq!(resolved.video_device, "/dev/video5");
+    }
+
+    #[test]
+    fn messenger_emits_text_and_error_messages() {
+        conversation_log().lock().unwrap().clear();
+        let mut messenger = PamConversationMessenger::from_callback(recording_conv);
+        let mut logger = PamLogger::new("test-service");
+
+        messenger.send_text_info(&mut logger, "Face authentication succeeded");
+        messenger.send_error_msg(&mut logger, "Face authentication failed");
+
+        let entries = conversation_log().lock().unwrap().clone();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, PamMessageStyle::TEXT_INFO);
+        assert!(entries[0].1.contains("succeeded"));
+        assert_eq!(entries[1].0, PamMessageStyle::ERROR_MSG);
+        assert!(entries[1].1.contains("failed"));
     }
 }

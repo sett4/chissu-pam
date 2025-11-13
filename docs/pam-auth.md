@@ -65,6 +65,7 @@ If model paths are omitted, the module falls back to the `DLIB_LANDMARK_MODEL` a
 - Frames are sampled at intervals governed by `frame_interval_millis` (sleep is skipped when the remaining time is smaller than the interval).
 - Descriptors are compared only against the file for the PAM target user (`/var/lib/.../<user>.json`). Missing or empty stores produce `PAM_AUTH_ERR`.
 - All notable events are emitted via syslog (`AUTHPRIV` facility) with identifier `pam_chissu`. Inspect them with `journalctl -t pam_chissu`.
+- When the PAM stack exposes a conversation callback, the module mirrors those events interactively: successful matches emit a `PAM_TEXT_INFO` banner, while retries (no face yet) and failures send `PAM_ERROR_MSG` guidance so terminal users know whether to stay in frame or re-run the command.
 - Operational errors (configuration parse, camera I/O, model load) are reported as `PAM_SYSTEM_ERR`. The message includes the failing step for easier triage.
 
 ## Testing without hardware
