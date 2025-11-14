@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/chissu-cli",
+    "crates/chissu-cli", "crates/chissu-config",
     "crates/chissu-face-core",
     "crates/pam-chissu"
 ]

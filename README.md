@@ -106,6 +106,8 @@ warmup_frames = 10
 
 With this file in place you can simply run `cargo run -p chissu-cli -- capture` and the CLI will capture from `/dev/video2` using the GREY pixel format while discarding 10 warm-up frames. Supplying CLI flags still wins over config values when you need to override a setting temporarily.
 
+> Developer note: both `chissu-cli` and the PAM module load this file via `crates/chissu-config`, so add any new keys or validation to that crate to keep every binary in sync.
+
 On failures the command prints a descriptive message to `stderr`. With `--json`, a structured error is emitted on `stdout` and diagnostic hints remain on `stderr`.
 
 ### Face feature extraction

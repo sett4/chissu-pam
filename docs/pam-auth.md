@@ -36,7 +36,7 @@ sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu
 
 ## Configuration
 
-The module reads configuration from `/etc/chissu-pam/config.toml`. If the file is absent it falls back to `/usr/local/etc/chissu-pam/config.toml`. Both files are optional—defaults are used when neither exists. Available keys:
+The module reads configuration from `/etc/chissu-pam/config.toml`. If the file is absent it falls back to `/usr/local/etc/chissu-pam/config.toml`. Both files are optional—defaults are used when neither exists. Developers adding new keys or validations must update `crates/chissu-config`, which is the shared loader used by both the PAM module and `chissu-cli`. Available keys:
 
 ```toml
 similarity_threshold = 0.75     # Float, default 0.7

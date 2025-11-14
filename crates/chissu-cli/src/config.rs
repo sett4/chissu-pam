@@ -1,23 +1,8 @@
-use std::fs;
-use std::io;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use chissu_config::{self, ConfigError, ConfigFile, PRIMARY_CONFIG_PATH, SECONDARY_CONFIG_PATH};
 
 use crate::errors::{AppError, AppResult};
-
-const PRIMARY_CONFIG_PATH: &str = "/etc/chissu-pam/config.toml";
-const SECONDARY_CONFIG_PATH: &str = "/usr/local/etc/chissu-pam/config.toml";
-
-#[derive(Debug, Deserialize, Default, Clone)]
-struct ConfigFile {
-    descriptor_store_dir: Option<PathBuf>,
-    video_device: Option<String>,
-    pixel_format: Option<String>,
-    warmup_frames: Option<u32>,
-    landmark_model: Option<PathBuf>,
-    encoder_model: Option<PathBuf>,
-}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CaptureDefaults {
@@ -47,7 +32,7 @@ fn resolve_store_dir_with_sources(
     if cli_value.is_some() {
         return Ok(cli_value);
     }
-    Ok(load_config_file(sources)?.and_then(|file| file.descriptor_store_dir))
+    Ok(load_config_from_paths(sources)?.and_then(|file| file.descriptor_store_dir))
 }
 
 pub fn load_capture_defaults() -> AppResult<CaptureDefaults> {
@@ -60,10 +45,12 @@ pub fn load_capture_defaults() -> AppResult<CaptureDefaults> {
 
 fn load_capture_defaults_with_sources(paths: &[PathBuf]) -> AppResult<CaptureDefaults> {
     Ok(
-        load_config_file(paths)?.map_or_else(CaptureDefaults::default, |file| CaptureDefaults {
-            device: file.video_device,
-            pixel_format: file.pixel_format,
-            warmup_frames: file.warmup_frames,
+        load_config_from_paths(paths)?.map_or_else(CaptureDefaults::default, |file| {
+            CaptureDefaults {
+                device: file.video_device,
+                pixel_format: file.pixel_format,
+                warmup_frames: file.warmup_frames,
+            }
         }),
     )
 }
@@ -78,7 +65,7 @@ pub fn load_face_model_defaults() -> AppResult<FaceModelDefaults> {
 
 fn load_face_model_defaults_with_sources(paths: &[PathBuf]) -> AppResult<FaceModelDefaults> {
     Ok(
-        load_config_file(paths)?.map_or_else(FaceModelDefaults::default, |file| {
+        load_config_from_paths(paths)?.map_or_else(FaceModelDefaults::default, |file| {
             FaceModelDefaults {
                 landmark_model: file.landmark_model,
                 encoder_model: file.encoder_model,
@@ -87,33 +74,23 @@ fn load_face_model_defaults_with_sources(paths: &[PathBuf]) -> AppResult<FaceMod
     )
 }
 
-fn load_config_file(paths: &[PathBuf]) -> AppResult<Option<ConfigFile>> {
-    for path in paths {
-        match fs::read_to_string(path) {
-            Ok(contents) => {
-                let parsed: ConfigFile =
-                    toml::from_str(&contents).map_err(|err| AppError::ConfigParse {
-                        path: path.clone(),
-                        message: err.to_string(),
-                    })?;
-                return Ok(Some(parsed));
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) => {
-                return Err(AppError::ConfigRead {
-                    path: path.clone(),
-                    source: err,
-                })
-            }
-        }
-    }
+fn load_config_from_paths(paths: &[PathBuf]) -> AppResult<Option<ConfigFile>> {
+    chissu_config::load_from_paths(paths)
+        .map(|loaded| loaded.map(|entry| entry.into_contents()))
+        .map_err(map_config_error)
+}
 
-    Ok(None)
+fn map_config_error(err: ConfigError) -> AppError {
+    match err {
+        ConfigError::Read { path, source } => AppError::ConfigRead { path, source },
+        ConfigError::Parse { path, message } => AppError::ConfigParse { path, message },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]

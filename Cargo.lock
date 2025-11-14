@@ -387,6 +387,7 @@ name = "chissu-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chissu-config",
  "chissu-face-core",
  "chrono",
  "clap",
@@ -394,16 +395,24 @@ dependencies = [
  "home",
  "image",
  "libc",
- "serde",
  "serde_json",
  "tempfile",
  "thiserror",
- "toml",
  "tracing",
  "tracing-subscriber",
  "uuid",
  "v4l",
  "whoami",
+]
+
+[[package]]
+name = "chissu-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -1332,6 +1341,7 @@ name = "pam-chissu"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chissu-config",
  "chissu-face-core",
  "image",
  "libc",
@@ -1342,7 +1352,6 @@ dependencies = [
  "syslog",
  "tempfile",
  "thiserror",
- "toml",
 ]
 
 [[package]]

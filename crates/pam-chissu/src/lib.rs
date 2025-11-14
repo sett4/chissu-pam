@@ -1,8 +1,6 @@
 mod secret_helper;
 
 use std::ffi::{c_void, CStr, CString};
-use std::fs;
-use std::io;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::ptr;
@@ -10,6 +8,7 @@ use std::slice;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use chissu_config::{self, ConfigError, ResolvedConfig, ResolvedConfigWithSource};
 use chissu_face_core::capture::{capture_frame_in_memory, CaptureConfig, DeviceLocator};
 use chissu_face_core::errors::AppError;
 use chissu_face_core::faces::{
@@ -24,23 +23,12 @@ use pam_sys::{
     PamMessageStyle, PamResponse, PamReturnCode,
 };
 use secret_helper::{run_secret_service_helper, HelperError as SecretHelperError, HelperResponse};
-use serde::Deserialize;
 use syslog::{Facility, Formatter3164, Logger, LoggerBackend};
 use thiserror::Error;
 
 type PamResult<T> = Result<T, AuthError>;
 
 const SYSLOG_IDENTIFIER: &str = "pam_chissu";
-const PRIMARY_CONFIG_PATH: &str = "/etc/chissu-pam/config.toml";
-const SECONDARY_CONFIG_PATH: &str = "/usr/local/etc/chissu-pam/config.toml";
-const DEFAULT_THRESHOLD: f64 = 0.7;
-const DEFAULT_TIMEOUT_SECS: u64 = 5;
-const DEFAULT_INTERVAL_MILLIS: u64 = 500;
-const DEFAULT_VIDEO_DEVICE: &str = "/dev/video0";
-const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/models";
-const DEFAULT_PIXEL_FORMAT: &str = "Y16";
-const DEFAULT_WARMUP_FRAMES: u32 = 0;
-const DEFAULT_JITTERS: u32 = 1;
 
 #[derive(Debug, Error)]
 enum AuthError {
@@ -52,77 +40,6 @@ enum AuthError {
     Core(#[from] AppError),
     #[error("Secret Service unavailable: {0}")]
     SecretServiceUnavailable(String),
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct ConfigFile {
-    similarity_threshold: Option<f64>,
-    capture_timeout_secs: Option<u64>,
-    frame_interval_millis: Option<u64>,
-    descriptor_store_dir: Option<PathBuf>,
-    video_device: Option<String>,
-    pixel_format: Option<String>,
-    warmup_frames: Option<u32>,
-    jitters: Option<u32>,
-    landmark_model: Option<PathBuf>,
-    encoder_model: Option<PathBuf>,
-    require_secret_service: Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedConfig {
-    similarity_threshold: f64,
-    capture_timeout: Duration,
-    frame_interval: Duration,
-    descriptor_store_dir: PathBuf,
-    video_device: String,
-    pixel_format: String,
-    warmup_frames: u32,
-    jitters: u32,
-    landmark_model: Option<PathBuf>,
-    encoder_model: Option<PathBuf>,
-    require_secret_service: bool,
-}
-
-impl ResolvedConfig {
-    fn from_raw(raw: ConfigFile) -> Self {
-        Self {
-            similarity_threshold: raw.similarity_threshold.unwrap_or(DEFAULT_THRESHOLD),
-            capture_timeout: Duration::from_secs(
-                raw.capture_timeout_secs
-                    .unwrap_or(DEFAULT_TIMEOUT_SECS)
-                    .max(1),
-            ),
-            frame_interval: Duration::from_millis(
-                raw.frame_interval_millis.unwrap_or(DEFAULT_INTERVAL_MILLIS),
-            ),
-            descriptor_store_dir: raw
-                .descriptor_store_dir
-                .unwrap_or_else(|| PathBuf::from(DEFAULT_STORE_DIR)),
-            video_device: raw
-                .video_device
-                .unwrap_or_else(|| DEFAULT_VIDEO_DEVICE.to_string()),
-            pixel_format: raw
-                .pixel_format
-                .unwrap_or_else(|| DEFAULT_PIXEL_FORMAT.to_string()),
-            warmup_frames: raw.warmup_frames.unwrap_or(DEFAULT_WARMUP_FRAMES),
-            jitters: raw.jitters.unwrap_or(DEFAULT_JITTERS),
-            landmark_model: raw.landmark_model,
-            encoder_model: raw.encoder_model,
-            require_secret_service: raw.require_secret_service.unwrap_or(false),
-        }
-    }
-}
-
-impl Default for ResolvedConfig {
-    fn default() -> Self {
-        Self::from_raw(ConfigFile::default())
-    }
-}
-
-struct LoadedConfig {
-    resolved: ResolvedConfig,
-    source: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -435,7 +352,7 @@ fn authenticate_user(
 ) -> PamResult<AuthResult> {
     validate_user_name(&request.user)?;
 
-    let LoadedConfig {
+    let ResolvedConfigWithSource {
         resolved: config,
         source,
     } = load_config()?;
@@ -705,34 +622,18 @@ fn load_descriptor_store(
     }
 }
 
-fn load_config() -> PamResult<LoadedConfig> {
-    if let Some(raw) = try_read_config(PRIMARY_CONFIG_PATH)? {
-        return Ok(LoadedConfig {
-            resolved: ResolvedConfig::from_raw(raw),
-            source: Some(PathBuf::from(PRIMARY_CONFIG_PATH)),
-        });
-    }
-
-    if let Some(raw) = try_read_config(SECONDARY_CONFIG_PATH)? {
-        return Ok(LoadedConfig {
-            resolved: ResolvedConfig::from_raw(raw),
-            source: Some(PathBuf::from(SECONDARY_CONFIG_PATH)),
-        });
-    }
-
-    Ok(LoadedConfig {
-        resolved: ResolvedConfig::default(),
-        source: None,
-    })
+fn load_config() -> PamResult<ResolvedConfigWithSource> {
+    chissu_config::load_resolved_config().map_err(map_config_error)
 }
 
-fn try_read_config(path: &str) -> PamResult<Option<ConfigFile>> {
-    match fs::read_to_string(path) {
-        Ok(contents) => toml::from_str(&contents)
-            .map(Some)
-            .map_err(|err| AuthError::Config(format!("Failed to parse {path}: {err}"))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(AuthError::Config(format!("Failed to read {path}: {err}"))),
+fn map_config_error(err: ConfigError) -> AuthError {
+    match err {
+        ConfigError::Read { path, source } => {
+            AuthError::Config(format!("Failed to read {}: {}", path.display(), source))
+        }
+        ConfigError::Parse { path, message } => {
+            AuthError::Config(format!("Failed to parse {}: {}", path.display(), message))
+        }
     }
 }
 
@@ -811,20 +712,23 @@ mod tests {
     #[test]
     fn resolved_config_defaults() {
         let loaded = ResolvedConfig::default();
-        assert_eq!(loaded.similarity_threshold, DEFAULT_THRESHOLD);
+        assert_eq!(
+            loaded.similarity_threshold,
+            chissu_config::DEFAULT_SIMILARITY_THRESHOLD
+        );
         assert_eq!(
             loaded.capture_timeout,
-            Duration::from_secs(DEFAULT_TIMEOUT_SECS)
+            Duration::from_secs(chissu_config::DEFAULT_TIMEOUT_SECS)
         );
         assert_eq!(
             loaded.frame_interval,
-            Duration::from_millis(DEFAULT_INTERVAL_MILLIS)
+            Duration::from_millis(chissu_config::DEFAULT_INTERVAL_MILLIS)
         );
-        assert_eq!(loaded.video_device, DEFAULT_VIDEO_DEVICE);
-        assert_eq!(loaded.pixel_format, DEFAULT_PIXEL_FORMAT);
+        assert_eq!(loaded.video_device, chissu_config::DEFAULT_VIDEO_DEVICE);
+        assert_eq!(loaded.pixel_format, chissu_config::DEFAULT_PIXEL_FORMAT);
         assert_eq!(
             loaded.descriptor_store_dir,
-            PathBuf::from(DEFAULT_STORE_DIR)
+            PathBuf::from(chissu_config::DEFAULT_STORE_DIR)
         );
         assert!(!loaded.require_secret_service);
     }
@@ -910,9 +814,10 @@ mod tests {
         )
         .unwrap();
 
-        let raw = try_read_config(file.path().to_str().unwrap())
+        let loaded = chissu_config::load_from_paths(&[file.path().to_path_buf()])
             .unwrap()
             .unwrap();
+        let raw = loaded.into_contents();
         let resolved = ResolvedConfig::from_raw(raw);
         assert_eq!(resolved.similarity_threshold, 0.8);
         assert_eq!(resolved.video_device, "/dev/video5");
@@ -922,9 +827,10 @@ mod tests {
     fn try_read_config_disables_secret_service_when_requested() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "require_secret_service = false").unwrap();
-        let raw = try_read_config(file.path().to_str().unwrap())
+        let loaded = chissu_config::load_from_paths(&[file.path().to_path_buf()])
             .unwrap()
             .unwrap();
+        let raw = loaded.into_contents();
         let resolved = ResolvedConfig::from_raw(raw);
         assert!(!resolved.require_secret_service);
     }
