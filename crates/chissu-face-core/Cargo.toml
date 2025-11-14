@@ -15,3 +15,6 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 thiserror = "1.0"
 keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+aes-gcm = { version = "0.10", features = ["aes"] }
+rand = "0.8"
+base64 = "0.21"

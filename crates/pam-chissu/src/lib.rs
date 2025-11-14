@@ -1,3 +1,5 @@
+mod secret_helper;
+
 use std::ffi::{c_void, CStr, CString};
 use std::fs;
 use std::io;
@@ -14,15 +16,14 @@ use chissu_face_core::faces::{
     cosine_similarity, load_enrolled_descriptors, validate_user_name, DlibBackend,
     EnrolledDescriptor, FaceEmbeddingBackend, FaceExtractionConfig,
 };
-use chissu_face_core::secret_service::{
-    default_service_name, ensure_secret_service_available, KeyringSecretServiceProbe,
-};
+use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
 use libc::{c_int, free};
 use pam_sys::{
     get_item, get_user, ConvClosure, PamConversation, PamHandle, PamItemType, PamMessage,
     PamMessageStyle, PamResponse, PamReturnCode,
 };
+use secret_helper::{run_secret_service_helper, HelperError as SecretHelperError, HelperResponse};
 use serde::Deserialize;
 use syslog::{Facility, Formatter3164, Logger, LoggerBackend};
 use thiserror::Error;
@@ -439,20 +440,44 @@ fn authenticate_user(
         logger.info("No configuration file found; using built-in defaults");
     }
 
+    let mut descriptor_key: Option<Vec<u8>> = None;
+
     if config.require_secret_service {
-        ensure_secret_service_available(&KeyringSecretServiceProbe, &request.user)
-            .map_err(|err| AuthError::SecretServiceUnavailable(err.to_string()))?;
-        logger.info(&format!(
-            "Secret Service available for user '{}' via service '{}' — proceeding with capture",
-            request.user,
-            default_service_name(),
-        ));
+        match run_secret_service_helper(&request.user, config.capture_timeout) {
+            Ok(HelperResponse::Key(key_bytes)) => {
+                logger.info(&format!(
+                    "Secret Service helper returned descriptor key ({} bytes) for user '{}' via service '{}' — proceeding",
+                    key_bytes.len(),
+                    request.user,
+                    default_service_name(),
+                ));
+                descriptor_key = Some(key_bytes);
+            }
+            Ok(HelperResponse::Missing { message }) => {
+                logger.warn(&format!(
+                    "Descriptor key missing for user '{}': {message}",
+                    request.user
+                ));
+                return Ok(AuthResult::failure(
+                    FailureReason::DescriptorsMissing,
+                    f64::NEG_INFINITY,
+                    0,
+                ));
+            }
+            Err(SecretHelperError::SecretServiceUnavailable(message)) => {
+                return Err(AuthError::SecretServiceUnavailable(message));
+            }
+            Err(SecretHelperError::IpcFailure(message)) => {
+                return Err(AuthError::Pam(format!(
+                    "Secret Service helper failed: {message}"
+                )));
+            }
+        }
     } else {
         logger.info("Secret Service probe disabled via configuration; continuing without check");
     }
 
-    let descriptors =
-        load_enrolled_descriptors(Some(config.descriptor_store_dir.as_path()), &request.user)?;
+    let descriptors = load_descriptor_store(&config, request, logger, &mut descriptor_key)?;
     if descriptors.is_empty() {
         return Ok(AuthResult::failure(
             FailureReason::DescriptorsMissing,
@@ -622,6 +647,57 @@ fn gray_to_rgb(image: &image::GrayImage) -> RgbImage {
         *pixel = Rgb([v, v, v]);
     }
     rgb
+}
+
+fn load_descriptor_store(
+    config: &ResolvedConfig,
+    request: &PamRequest,
+    logger: &mut PamLogger,
+    descriptor_key: &mut Option<Vec<u8>>,
+) -> PamResult<Vec<EnrolledDescriptor>> {
+    loop {
+        match load_enrolled_descriptors(
+            Some(config.descriptor_store_dir.as_path()),
+            &request.user,
+            descriptor_key.as_deref(),
+        ) {
+            Ok(descriptors) => return Ok(descriptors),
+            Err(AppError::EncryptedStoreRequiresKey { .. }) => {
+                if descriptor_key.is_some() {
+                    return Err(AuthError::SecretServiceUnavailable(
+                        "Secret Service key failed to decrypt descriptor store".into(),
+                    ));
+                }
+                match run_secret_service_helper(&request.user, config.capture_timeout) {
+                    Ok(HelperResponse::Key(bytes)) => {
+                        logger.info(&format!(
+                            "Secret Service helper returned descriptor key ({} bytes) for user '{}' via service '{}' — retrying store load",
+                            bytes.len(),
+                            request.user,
+                            default_service_name(),
+                        ));
+                        *descriptor_key = Some(bytes);
+                    }
+                    Ok(HelperResponse::Missing { message }) => {
+                        logger.warn(&format!(
+                            "Descriptor key missing for user '{}': {message}",
+                            request.user
+                        ));
+                        return Err(AuthError::SecretServiceUnavailable(message));
+                    }
+                    Err(SecretHelperError::SecretServiceUnavailable(message)) => {
+                        return Err(AuthError::SecretServiceUnavailable(message));
+                    }
+                    Err(SecretHelperError::IpcFailure(message)) => {
+                        return Err(AuthError::Pam(format!(
+                            "Secret Service helper failed: {message}"
+                        )));
+                    }
+                }
+            }
+            Err(err) => return Err(AuthError::Core(err)),
+        }
+    }
 }
 
 fn load_config() -> PamResult<LoadedConfig> {

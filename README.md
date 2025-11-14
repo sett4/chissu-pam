@@ -206,21 +206,9 @@ Register descriptor vectors with a specific Linux user so the planned PAM module
 cargo run -p chissu-cli -- faces enroll --user alice captures/features/reference.json
 ```
 
-Each descriptor receives a unique identifier and is appended to `/var/lib/chissu-pam/models/alice.json` by default (created automatically with `0600` permissions). The store is a JSON array containing the descriptor vector, bounding box, source file, creation timestamp, and stable ID:
+Each descriptor receives a unique identifier and is appended to `/var/lib/chissu-pam/models/alice.json` by default (created automatically with `0600` permissions). The CLI now generates or rotates a 32-byte AES-256-GCM key for the user, registers it with Secret Service (`service = chissu-pam`, `user = <pam user>`), decrypts any existing store, and rewrites the updated store in encrypted form. Legacy plaintext stores are migrated automatically the first time you run the command after upgrading. The decrypted content remains the same JSON array you are used to (descriptor vector, bounding box, source file, creation timestamp, and stable ID), but it now lives inside an encrypted wrapper on disk.
 
-```json
-[
-  {
-    "id": "4ac00b41-5f0d-4d2b-9a65-1bf01cb6cb4c",
-    "descriptor": [0.0123, 0.1042, 0.0831, 0.0987],
-    "bounding_box": { "left": 120, "top": 80, "right": 320, "bottom": 360 },
-    "source": "captures/features/reference.json",
-    "created_at": "2025-11-03T20:15:11.204Z"
-  }
-]
-```
-
-Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` to override the storage directory explicitly. When the flag is omitted, the CLI reads `descriptor_store_dir` from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml`), then consults the `CHISSU_PAM_STORE_DIR` environment variable, and finally falls back to the built-in `/var/lib/chissu-pam/models/` location.
+Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` to override the storage directory explicitly. When the flag is omitted, the CLI reads `descriptor_store_dir` from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml`), then consults the `CHISSU_PAM_STORE_DIR` environment variable, and finally falls back to the built-in `/var/lib/chissu-pam/models/` location. Remember that the Secret Service daemon for the target user must be reachable during enrollment so the key rotation succeeds.
 
 - Missing or unreadable descriptor files exit with status code `2`.
 - Malformed payloads or empty descriptor lists exit with status code `3` and leave the store untouched.
@@ -243,7 +231,7 @@ cargo run -p chissu-cli -- faces enroll --user alice --store-dir ./captures/enro
 cargo run -p chissu-cli -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./captures/enrolled
 ```
 
-The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors).
+The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors). Behind the scenes the CLI fetches the user’s AES-GCM key from Secret Service, decrypts the store, removes the requested records, and re-encrypts the result with the same key so PAM continues to read the file.
 
 When neither command receives `--store-dir`, they inherit the same precedence chain described for enrollment (config files, then `CHISSU_PAM_STORE_DIR`, then the built-in path), keeping CLI operations aligned with the PAM module configuration.
 
@@ -265,8 +253,8 @@ The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Li
   - `require_secret_service = false`
 - Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissu` or `journalctl SYSLOG_IDENTIFIER=pam_chissu`.
 - Interactive PAM conversations mirror those events on the terminal: successful matches trigger a `PAM_TEXT_INFO` banner, while retries and failures emit `PAM_ERROR_MSG` guidance ("stay in frame", "no descriptors", etc.) so operators see immediate feedback even without tailing syslog.
-- Before opening the camera the module probes the GNOME Secret Service via the `keyring` crate. If the session bus/keyring is locked or missing, it logs the reason, emits a PAM error message explaining the skip, and returns `PAM_IGNORE` so the rest of the stack (typically password) continues.
-- Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the probe inside PAM; it defaults to `false` so you can opt in once keyring/DEK workflows are ready.
+- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM descriptor key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no descriptors" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable so downstream modules can continue handling the login.
+- Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the helper inside PAM; it defaults to `false` so you can opt in once the desktop session exposes Secret Service. Store a 32-byte AES-GCM descriptor key (Base64-encoded) under `service=chissu-pam` and `user=<pam user>` so the helper can unlock descriptor files during authentication.
 - The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
 
 See [`docs/pam-auth.md`](docs/pam-auth.md) for installation walkthroughs, configuration examples, and troubleshooting tips.

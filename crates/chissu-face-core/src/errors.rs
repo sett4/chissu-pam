@@ -100,6 +100,15 @@ pub enum AppError {
         service: String,
         message: String,
     },
+
+    #[error("descriptor store {path} is encrypted and requires a Secret Service key")]
+    EncryptedStoreRequiresKey { path: PathBuf },
+
+    #[error("descriptor encryption error: {0}")]
+    Encryption(String),
+
+    #[error("Secret Service descriptor key for user {user} invalid: {message}")]
+    SecretServiceKeyInvalid { user: String, message: String },
 }
 
 impl AppError {
@@ -121,6 +130,9 @@ impl AppError {
             AppError::ConfigRead { .. } => ExitCode::from(2),
             AppError::ConfigParse { .. } => ExitCode::from(2),
             AppError::SecretServiceUnavailable { .. } => ExitCode::from(2),
+            AppError::EncryptedStoreRequiresKey { .. } => ExitCode::from(2),
+            AppError::Encryption(_) => ExitCode::from(2),
+            AppError::SecretServiceKeyInvalid { .. } => ExitCode::from(2),
             _ => ExitCode::from(1),
         }
     }
@@ -138,6 +150,22 @@ impl From<SecretServiceError> for AppError {
             user: err.user().to_string(),
             service: err.service().to_string(),
             message: err.message().to_string(),
+        }
+    }
+}
+
+impl From<crate::secret_service::DescriptorKeyLookupError> for AppError {
+    fn from(err: crate::secret_service::DescriptorKeyLookupError) -> Self {
+        match err {
+            crate::secret_service::DescriptorKeyLookupError::SecretService(inner) => {
+                AppError::from(inner)
+            }
+            crate::secret_service::DescriptorKeyLookupError::InvalidFormat { user, reason } => {
+                AppError::SecretServiceKeyInvalid {
+                    user,
+                    message: reason,
+                }
+            }
         }
     }
 }

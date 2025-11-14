@@ -5,23 +5,34 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{SecondsFormat, Utc};
 use dlib_face_recognition::{
     FaceDetector, FaceDetectorTrait, FaceEncoderNetwork, FaceEncoderTrait, ImageMatrix,
     LandmarkPredictor, LandmarkPredictorTrait,
 };
 use image::{self, RgbImage};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tracing::debug;
 use uuid::Uuid;
 
 use crate::errors::{AppError, AppResult};
+use crate::secret_service::{
+    fetch_descriptor_key, generate_descriptor_key, store_descriptor_key, DescriptorKey,
+    DescriptorKeyStatus,
+};
 
 const LANDMARK_ENV: &str = "DLIB_LANDMARK_MODEL";
 const ENCODER_ENV: &str = "DLIB_ENCODER_MODEL";
 const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/models";
 const FEATURE_STORE_ENV: &str = "CHISSU_PAM_STORE_DIR";
+const STORE_VERSION: u32 = 1;
+const STORE_ALGORITHM: &str = "AES-256-GCM";
+const STORE_NONCE_LEN: usize = 12;
 
 #[derive(Debug, Clone)]
 pub struct FaceExtractionConfig {
@@ -51,6 +62,29 @@ pub struct FaceRemovalConfig {
     pub descriptor_ids: Vec<String>,
     pub remove_all: bool,
     pub store_dir: Option<PathBuf>,
+}
+
+pub(crate) trait DescriptorKeyBackend {
+    fn fetch(&self, user: &str) -> AppResult<DescriptorKeyStatus>;
+    fn store(&self, user: &str, key: &[u8]) -> AppResult<()>;
+    fn generate(&self) -> DescriptorKey;
+}
+
+#[derive(Clone, Copy, Default)]
+struct SecretServiceDescriptorKeyBackend;
+
+impl DescriptorKeyBackend for SecretServiceDescriptorKeyBackend {
+    fn fetch(&self, user: &str) -> AppResult<DescriptorKeyStatus> {
+        fetch_descriptor_key(user).map_err(AppError::from)
+    }
+
+    fn store(&self, user: &str, key: &[u8]) -> AppResult<()> {
+        store_descriptor_key(user, key).map_err(AppError::from)
+    }
+
+    fn generate(&self) -> DescriptorKey {
+        generate_descriptor_key()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +351,13 @@ pub fn run_face_comparison(config: &FaceComparisonConfig) -> AppResult<FaceCompa
 }
 
 pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome> {
+    run_face_enrollment_with_backend(config, &SecretServiceDescriptorKeyBackend)
+}
+
+pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
+    config: &FaceEnrollmentConfig,
+    backend: &B,
+) -> AppResult<FaceEnrollmentOutcome> {
     validate_user_name(&config.user)?;
 
     let mut logs = Vec::new();
@@ -336,7 +377,13 @@ pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrol
     ));
 
     let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
-    let mut existing = read_enrolled_store(&store_path)?;
+    let fetched_key = backend.fetch(&config.user)?;
+    let current_key: Option<Vec<u8>> = match fetched_key {
+        DescriptorKeyStatus::Present(key) => Some(key.into_bytes()),
+        DescriptorKeyStatus::Missing => None,
+    };
+
+    let mut existing = read_enrolled_store(&store_path, current_key.as_deref())?;
 
     if let Some(current_len) = existing.first().map(|entry| entry.descriptor.len()) {
         if current_len != descriptor_len {
@@ -369,13 +416,20 @@ pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrol
         });
     }
 
-    write_enrolled_store(&store_path, &existing)?;
+    let new_key = backend.generate();
+    write_enrolled_store(&store_path, &existing, Some(new_key.as_bytes()))?;
+    backend.store(&config.user, new_key.as_bytes())?;
+
     logs.push(format!(
         "Enrolled {} descriptor(s) for user {}",
         added.len(),
         config.user
     ));
     logs.push(format!("Feature store: {}", store_path.display()));
+    logs.push(format!(
+        "Rotated Secret Service descriptor key for user {}",
+        config.user
+    ));
 
     Ok(FaceEnrollmentOutcome {
         user: config.user.clone(),
@@ -386,11 +440,24 @@ pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrol
 }
 
 pub fn run_face_removal(config: &FaceRemovalConfig) -> AppResult<FaceRemovalOutcome> {
+    run_face_removal_with_backend(config, &SecretServiceDescriptorKeyBackend)
+}
+
+pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
+    config: &FaceRemovalConfig,
+    backend: &B,
+) -> AppResult<FaceRemovalOutcome> {
     validate_user_name(&config.user)?;
 
     let mut logs = Vec::new();
     let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
-    let existing = read_enrolled_store(&store_path)?;
+    let fetched_key = backend.fetch(&config.user)?;
+    let key_bytes: Option<Vec<u8>> = match fetched_key {
+        DescriptorKeyStatus::Present(key) => Some(key.into_bytes()),
+        DescriptorKeyStatus::Missing => None,
+    };
+
+    let existing = read_enrolled_store(&store_path, key_bytes.as_deref())?;
     logs.push(format!(
         "Loaded {} descriptor(s) for user {}",
         existing.len(),
@@ -450,7 +517,7 @@ pub fn run_face_removal(config: &FaceRemovalConfig) -> AppResult<FaceRemovalOutc
         }
     }
 
-    write_enrolled_store(&store_path, &retained)?;
+    write_enrolled_store(&store_path, &retained, key_bytes.as_deref())?;
     logs.push(format!(
         "Removed {} descriptor(s) for user {}",
         removed_ids.len(),
@@ -481,7 +548,11 @@ pub fn load_summary(path: &Path) -> AppResult<FaceExtractionSummary> {
     Ok(summary)
 }
 
-pub fn write_enrolled_store(path: &Path, descriptors: &[EnrolledDescriptor]) -> AppResult<()> {
+pub fn write_enrolled_store(
+    path: &Path,
+    descriptors: &[EnrolledDescriptor],
+    key: Option<&[u8]>,
+) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| AppError::FeatureWrite {
             path: parent.to_path_buf(),
@@ -499,7 +570,18 @@ pub fn write_enrolled_store(path: &Path, descriptors: &[EnrolledDescriptor]) -> 
         let file = tmp.as_file_mut();
         {
             let mut writer = BufWriter::new(&mut *file);
-            serde_json::to_writer_pretty(&mut writer, descriptors)?;
+            let serialized = if let Some(key_bytes) = key {
+                serialize_encrypted_store(descriptors, key_bytes)?
+            } else {
+                serde_json::to_vec_pretty(descriptors)?
+            };
+            writer
+                .write_all(&serialized)
+                .map_err(|source| AppError::FeatureWrite {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            writer.write_all(b"\n").ok();
             writer.flush().map_err(|source| AppError::FeatureWrite {
                 path: path.to_path_buf(),
                 source,
@@ -537,22 +619,103 @@ pub fn write_enrolled_store(path: &Path, descriptors: &[EnrolledDescriptor]) -> 
     Ok(())
 }
 
-pub fn read_enrolled_store(path: &Path) -> AppResult<Vec<EnrolledDescriptor>> {
+fn serialize_encrypted_store(descriptors: &[EnrolledDescriptor], key: &[u8]) -> AppResult<Vec<u8>> {
+    let plaintext = serde_json::to_vec(descriptors)?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|_| AppError::Encryption("invalid AES-GCM key length".into()))?;
+    let mut nonce = [0u8; STORE_NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce);
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
+        .map_err(|err| {
+            AppError::Encryption(format!("failed to encrypt descriptor store: {err}"))
+        })?;
+    let wrapper = EncryptedDescriptorStore {
+        version: STORE_VERSION,
+        algorithm: STORE_ALGORITHM.to_string(),
+        nonce: general_purpose::STANDARD.encode(nonce),
+        ciphertext: general_purpose::STANDARD.encode(ciphertext),
+    };
+    serde_json::to_vec_pretty(&wrapper).map_err(AppError::from)
+}
+
+pub fn read_enrolled_store(path: &Path, key: Option<&[u8]>) -> AppResult<Vec<EnrolledDescriptor>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
 
-    let file = File::open(path).map_err(|source| AppError::FeatureRead {
+    let data = fs::read(path).map_err(|source| AppError::FeatureRead {
         path: path.to_path_buf(),
         source,
     })?;
-    let reader = BufReader::new(file);
-    let descriptors: Vec<EnrolledDescriptor> =
-        serde_json::from_reader(reader).map_err(|err| AppError::InvalidFeatureFile {
-            path: path.to_path_buf(),
-            message: format!("invalid feature store contents: {err}"),
+
+    if let Ok(wrapper) = serde_json::from_slice::<EncryptedDescriptorStore>(&data) {
+        return decrypt_encrypted_store(path, wrapper, key);
+    }
+
+    serde_json::from_slice(&data).map_err(|err| AppError::InvalidFeatureFile {
+        path: path.to_path_buf(),
+        message: format!("invalid feature store contents: {err}"),
+    })
+}
+
+fn decrypt_encrypted_store(
+    path: &Path,
+    wrapper: EncryptedDescriptorStore,
+    key: Option<&[u8]>,
+) -> AppResult<Vec<EnrolledDescriptor>> {
+    if wrapper.algorithm != STORE_ALGORITHM {
+        return Err(AppError::Encryption(format!(
+            "unsupported descriptor store algorithm '{}'",
+            wrapper.algorithm
+        )));
+    }
+    if wrapper.version != STORE_VERSION {
+        return Err(AppError::Encryption(format!(
+            "unsupported descriptor store version {}",
+            wrapper.version
+        )));
+    }
+
+    let key_bytes = key.ok_or_else(|| AppError::EncryptedStoreRequiresKey {
+        path: path.to_path_buf(),
+    })?;
+
+    let nonce_bytes = general_purpose::STANDARD
+        .decode(wrapper.nonce.trim())
+        .map_err(|err| AppError::Encryption(format!("invalid nonce encoding: {err}")))?;
+    if nonce_bytes.len() != STORE_NONCE_LEN {
+        return Err(AppError::Encryption(format!(
+            "expected nonce of {} bytes but found {}",
+            STORE_NONCE_LEN,
+            nonce_bytes.len()
+        )));
+    }
+
+    let ciphertext = general_purpose::STANDARD
+        .decode(wrapper.ciphertext.trim())
+        .map_err(|err| AppError::Encryption(format!("invalid ciphertext encoding: {err}")))?;
+
+    let cipher = Aes256Gcm::new_from_slice(key_bytes)
+        .map_err(|_| AppError::Encryption("invalid AES-GCM key length".into()))?;
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
+        .map_err(|err| {
+            AppError::Encryption(format!("failed to decrypt descriptor store: {err}"))
         })?;
-    Ok(descriptors)
+
+    serde_json::from_slice(&plaintext).map_err(|err| AppError::InvalidFeatureFile {
+        path: path.to_path_buf(),
+        message: format!("invalid decrypted feature store contents: {err}"),
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+struct EncryptedDescriptorStore {
+    version: u32,
+    algorithm: String,
+    nonce: String,
+    ciphertext: String,
 }
 
 pub fn user_store_path(store_dir: Option<&Path>, user: &str) -> PathBuf {
@@ -569,9 +732,10 @@ pub fn user_store_path(store_dir: Option<&Path>, user: &str) -> PathBuf {
 pub fn load_enrolled_descriptors(
     store_dir: Option<&Path>,
     user: &str,
+    key: Option<&[u8]>,
 ) -> AppResult<Vec<EnrolledDescriptor>> {
     let path = user_store_path(store_dir, user);
-    read_enrolled_store(&path)
+    read_enrolled_store(&path, key)
 }
 
 pub fn validate_user_name(user: &str) -> AppResult<()> {
@@ -759,8 +923,11 @@ impl FaceEmbeddingBackend for DlibBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secret_service::AES_GCM_KEY_BYTES;
     use image::Rgb;
     use serde_json::Value;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
     use std::env;
     use std::fs::File;
     use std::path::Path;
@@ -822,6 +989,53 @@ mod tests {
             landmark_model: "landmark.dat".into(),
             encoder_model: "encoder.dat".into(),
             num_jitters: 1,
+        }
+    }
+
+    #[derive(Default)]
+    struct StubKeyBackend {
+        stored: RefCell<Option<Vec<u8>>>,
+        queued: RefCell<VecDeque<Vec<u8>>>,
+    }
+
+    impl StubKeyBackend {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn enqueue_key_with_byte(&self, byte: u8) {
+            self.queued
+                .borrow_mut()
+                .push_back(vec![byte; AES_GCM_KEY_BYTES]);
+        }
+
+        fn current_key(&self) -> Option<Vec<u8>> {
+            self.stored.borrow().clone()
+        }
+    }
+
+    impl DescriptorKeyBackend for StubKeyBackend {
+        fn fetch(&self, _user: &str) -> AppResult<DescriptorKeyStatus> {
+            Ok(match self.stored.borrow().clone() {
+                Some(bytes) => DescriptorKeyStatus::Present(
+                    DescriptorKey::from_bytes(bytes).expect("valid stub key"),
+                ),
+                None => DescriptorKeyStatus::Missing,
+            })
+        }
+
+        fn store(&self, _user: &str, key: &[u8]) -> AppResult<()> {
+            self.stored.replace(Some(key.to_vec()));
+            Ok(())
+        }
+
+        fn generate(&self) -> DescriptorKey {
+            let bytes = self
+                .queued
+                .borrow_mut()
+                .pop_front()
+                .expect("stub key backend missing queued key");
+            DescriptorKey::from_bytes(bytes).expect("valid stub key")
         }
     }
 
@@ -957,12 +1171,14 @@ mod tests {
             descriptor: descriptor_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
-        let outcome = run_face_enrollment(&config).unwrap();
+        let backend = StubKeyBackend::new();
+        backend.enqueue_key_with_byte(0x11);
+        let outcome = run_face_enrollment_with_backend(&config, &backend).unwrap();
         assert_eq!(outcome.added.len(), 2);
         let store_path = store_dir.join("alice.json");
         assert_eq!(outcome.store_path, store_path);
-        let written = std::fs::read_to_string(store_path).unwrap();
-        let records: Vec<EnrolledDescriptor> = serde_json::from_str(&written).unwrap();
+        let key = backend.current_key().unwrap();
+        let records = read_enrolled_store(&store_path, Some(key.as_slice())).unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].descriptor.len(), 3);
     }
@@ -982,7 +1198,8 @@ mod tests {
             descriptor: descriptor_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
-        let err = run_face_enrollment(&config).unwrap_err();
+        let backend = StubKeyBackend::new();
+        let err = run_face_enrollment_with_backend(&config, &backend).unwrap_err();
         match err {
             AppError::InvalidUser { .. } => {}
             other => panic!("unexpected error: {:?}", other),
@@ -1004,7 +1221,8 @@ mod tests {
             descriptor: descriptor_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
-        let err = run_face_enrollment(&config).unwrap_err();
+        let backend = StubKeyBackend::new();
+        let err = run_face_enrollment_with_backend(&config, &backend).unwrap_err();
         match err {
             AppError::DescriptorValidation { .. } => {}
             other => panic!("unexpected error: {:?}", other),
@@ -1027,7 +1245,9 @@ mod tests {
             descriptor: descriptor_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
-        let outcome = run_face_enrollment(&enroll_config).unwrap();
+        let backend = StubKeyBackend::new();
+        backend.enqueue_key_with_byte(0x22);
+        let outcome = run_face_enrollment_with_backend(&enroll_config, &backend).unwrap();
         let target_id = outcome.added[0].id.clone();
 
         let remove_config = FaceRemovalConfig {
@@ -1036,12 +1256,13 @@ mod tests {
             remove_all: false,
             store_dir: Some(store_dir.clone()),
         };
-        let removal = run_face_removal(&remove_config).unwrap();
+        let removal = run_face_removal_with_backend(&remove_config, &backend).unwrap();
         assert_eq!(removal.removed_ids, vec![target_id]);
         assert_eq!(removal.remaining, 1);
 
-        let written = std::fs::read_to_string(store_dir.join("alice.json")).unwrap();
-        let records: Vec<EnrolledDescriptor> = serde_json::from_str(&written).unwrap();
+        let key = backend.current_key().unwrap();
+        let records =
+            read_enrolled_store(&store_dir.join("alice.json"), Some(key.as_slice())).unwrap();
         assert_eq!(records.len(), 1);
     }
 
@@ -1056,7 +1277,8 @@ mod tests {
             remove_all: false,
             store_dir: Some(store_dir.clone()),
         };
-        let err = run_face_removal(&remove_config).unwrap_err();
+        let backend = StubKeyBackend::new();
+        let err = run_face_removal_with_backend(&remove_config, &backend).unwrap_err();
         match err {
             AppError::DescriptorNotFound { .. } => {}
             other => panic!("unexpected error: {:?}", other),
@@ -1078,7 +1300,9 @@ mod tests {
             descriptor: descriptor_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
-        run_face_enrollment(&enroll_config).unwrap();
+        let backend = StubKeyBackend::new();
+        backend.enqueue_key_with_byte(0x33);
+        run_face_enrollment_with_backend(&enroll_config, &backend).unwrap();
 
         let remove_config = FaceRemovalConfig {
             user: "alice".into(),
@@ -1086,7 +1310,7 @@ mod tests {
             remove_all: true,
             store_dir: Some(store_dir.clone()),
         };
-        let outcome = run_face_removal(&remove_config).unwrap();
+        let outcome = run_face_removal_with_backend(&remove_config, &backend).unwrap();
         assert!(outcome.cleared);
         assert_eq!(outcome.remaining, 0);
         assert!(!store_dir.join("alice.json").exists());

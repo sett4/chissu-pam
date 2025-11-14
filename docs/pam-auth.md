@@ -60,15 +60,23 @@ If model paths are omitted, the module falls back to the `DLIB_LANDMARK_MODEL` a
 
 ## Secret Service prerequisite
 
-`pam_chissu` verifies the per-user Secret Service (GNOME Keyring) session before attempting any capture. The module creates a temporary entry via the `keyring` crate and treats `NoEntry` as success (keyring reachable) so no secrets need to exist up-front. If the keyring daemon is locked, the DBus session is absent, or Secret Service returns a platform error, the module logs the reason, notifies the PAM conversation that face authentication is being skipped, and returns `PAM_IGNORE`. This allows downstream modules (password, hardware tokens, etc.) to continue without delay while ensuring future descriptor encryption work can rely on an unlocked keyring.
+`pam_chissu` now verifies Secret Service access by forking a helper child that drops privileges to the PAM target user (`initgroups` + `setgid` + `setuid`) and talks to the user's D-Bus session. The helper exchanges JSON with the parent over a pipe/socketpair and returns one of three statuses:
 
-Run `chissu-cli keyring check` (add `--json` for machine parsing) to exercise the same probe outside of PAM before modifying service stacks. Flip `require_secret_service = true` in the config to enforce the guard inside PAM once your environment has a working Secret Service; it defaults to `false` for compatibility with headless or console-only setups.
+- `{"status":"ok","aes_gcm_key":"<base64>"}` — a 32-byte AES-GCM descriptor key encoded as Base64. The parent logs success and proceeds to camera capture.
+- `{"status":"missing","message":"..."}` — no key is stored for that user/service. The parent maps this to the existing "no descriptors" flow so PAM returns `PAM_AUTH_ERR` with the usual messaging.
+- `{"status":"error","kind":"secret_service_unavailable","message":"..."}` — Secret Service is locked, missing, or refused the request. The parent logs the helper message, notifies the terminal, and returns `PAM_IGNORE` so downstream modules (password, hardware tokens, etc.) can continue.
+
+Populate the key with any Secret Service frontend (for example `secret-tool store --label 'Chissu descriptor key' service chissu-pam user alice` followed by pasting a 32-byte Base64 string). The helper trims whitespace, accepts padded or unpadded Base64, and rejects other encodings.
+
+Run `chissu-cli keyring check` (add `--json` for machine parsing) to confirm the current shell session can reach Secret Service before enabling the PAM guard. Flip `require_secret_service = true` once keys are provisioned; it defaults to `false` for compatibility with headless or console-only setups.
+
+`chissu-cli faces enroll` now performs the full key lifecycle: it decrypts any existing store (handling legacy plaintext files), generates a fresh 32-byte AES-256-GCM key, registers the key in Secret Service, and writes the updated descriptor store in encrypted form. Each subsequent enrollment repeats the rotation so compromised keys cannot decrypt newly written data. `faces remove` and `faces remove --all` reuse the currently registered key when they rewrite the store, keeping PAM and the helper in sync without unnecessary rotations.
 
 Troubleshooting tips:
 
 - Ensure a session bus and `gnome-keyring-daemon` (or compatible Secret Service implementation) are running for the target user before PAM attempts begin.
 - When testing via `pamtester` or SSH, forward the DBus session variables (e.g., `DBUS_SESSION_BUS_ADDRESS`) or rely on a display manager that exports them automatically.
-- Review `journalctl -t pam_chissu` for messages such as `Secret Service unavailable; skipping face authentication` to confirm the guard triggered and understand the underlying error reported by the keyring crate.
+- Review `journalctl -t pam_chissu` for messages such as `Secret Service helper returned descriptor key (...)` or `Descriptor key missing for user ...` to confirm the helper outcome. Errors prefixed with `Secret Service unavailable` indicate the guard short-circuited with `PAM_IGNORE`.
 
 ## Runtime behaviour
 

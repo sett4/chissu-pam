@@ -2,23 +2,22 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Install Dllib
-      run: sudo apt-get install -y libdlib-dev libopenblas-dev liblapack-dev libpam-dev
-    - name: Build
-      run: cargo build --verbose --workspace
-    - name: Run tests
-      run: cargo test --verbose --workspace
+      - uses: actions/checkout@v4
+      - name: Install Dllib
+        run: sudo apt-get install -y libdlib-dev libopenblas-dev liblapack-dev libpam-dev libdbus-1-dev
+      - name: Build
+        run: cargo build --verbose --workspace
+      - name: Run tests
+        run: cargo test --verbose --workspace
