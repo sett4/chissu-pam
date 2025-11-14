@@ -28,6 +28,8 @@ pub struct Cli {
 pub enum Commands {
     /// Capture a single frame from an infrared-capable webcam
     Capture(CaptureArgs),
+    /// Capture, extract, and enroll descriptors in one step
+    Enroll(EnrollArgs),
     /// Operations that work with facial feature extraction pipelines
     #[command(subcommand)]
     Faces(FacesCommands),
@@ -98,6 +100,33 @@ pub struct CaptureArgs {
     /// Optional output file path (defaults to captures/<timestamp>.png)
     #[arg(long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnrollArgs {
+    /// Target operating system user name (defaults to invoking user; root only)
+    #[arg(long)]
+    pub user: Option<String>,
+
+    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
+    #[arg(long)]
+    pub store_dir: Option<PathBuf>,
+
+    /// Video device path (e.g. /dev/video2) or index (e.g. 0)
+    #[arg(long)]
+    pub device: Option<String>,
+
+    /// Optional path to the dlib landmark predictor model (falls back to $DLIB_LANDMARK_MODEL)
+    #[arg(long)]
+    pub landmark_model: Option<PathBuf>,
+
+    /// Optional path to the dlib face recognition network (falls back to $DLIB_ENCODER_MODEL)
+    #[arg(long)]
+    pub encoder_model: Option<PathBuf>,
+
+    /// Number of image jitters to run before encoding (controls descriptor stability)
+    #[arg(long, default_value_t = 1)]
+    pub jitters: u32,
 }
 
 #[derive(Debug, Args)]
@@ -189,11 +218,5 @@ impl From<bool> for OutputMode {
         } else {
             OutputMode::Human
         }
-    }
-}
-
-impl Cli {
-    pub fn output_mode(&self) -> OutputMode {
-        OutputMode::from(self.json)
     }
 }

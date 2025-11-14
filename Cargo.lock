@@ -393,6 +393,7 @@ dependencies = [
  "dlib-face-recognition",
  "home",
  "image",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

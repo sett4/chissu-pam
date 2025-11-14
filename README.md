@@ -198,6 +198,44 @@ cargo run -p chissu-cli -- faces compare --input reference.json --compare-target
 
 If any descriptor file is missing, unreadable, or contains no faces, the command aborts, prints an error to `stderr`, and exits with status code `2`.
 
+### Config-driven face enrollment
+
+Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes descriptors, encrypts them via the same AES-GCM workflow as `faces enroll`, and deletes the temporary capture + descriptor files once enrollment succeeds.
+
+```bash
+cargo run -p chissu-cli -- enroll \
+  --landmark-model ./models/shape_predictor_68_face_landmarks.dat \
+  --encoder-model ./models/dlib_face_recognition_resnet_model_v1.dat
+```
+
+- Target user defaults to the invoking account. Passing `--user <name>` requires running as `root`; non-root overrides exit before touching the camera or descriptor store.
+- Use `--device /dev/video2` when you need to override the configured device, `--store-dir <path>` to bypass the config file, and `--jitters`, `--landmark-model`, `--encoder-model` to fine-tune extraction just like `faces extract`.
+- Model paths (`landmark_model`, `encoder_model`) inherit from `/etc/chissu-pam/config.toml` when present, so production deployments can keep the dlib weights in one location. CLI flags still win, and when both config and flags are absent the command falls back to `DLIB_LANDMARK_MODEL`/`DLIB_ENCODER_MODEL`.
+- `--json` mirrors the `faces enroll` payload (`user`, `store_path`, `added`) and appends capture metadata so automation can persist auditing data:
+
+```json
+{
+  "user": "alice",
+  "target_user": "alice",
+  "store_path": "/var/lib/chissu-pam/models/alice.json",
+  "added": [
+    {
+      "id": "7ae5d0e0-76d6-46f1-9ff4-c0cfd83a9a5a",
+      "descriptor_len": 128,
+      "source": "captures/auto-enroll/features-20251114T180102.101Z.json",
+      "created_at": "2025-11-14T18:01:02.134Z"
+    }
+  ],
+  "descriptor_ids": [
+    "7ae5d0e0-76d6-46f1-9ff4-c0cfd83a9a5a"
+  ],
+  "captured_image": "captures/auto-enroll/capture-20251114T180102.101Z.png",
+  "captured_image_deleted": true,
+  "descriptor_file_deleted": true,
+  "faces_detected": 1
+}
+```
+
 ### Face feature enrollment
 
 Register descriptor vectors with a specific Linux user so the planned PAM module can perform facial authentication. Point the command at a descriptor JSON exported by `faces extract`:

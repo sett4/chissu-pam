@@ -1,3 +1,4 @@
+mod auto_enroll;
 mod capture;
 mod cli;
 mod config;
@@ -13,7 +14,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::cli::{
-    Cli, Commands, FacesCommands, KeyringCommands, OutputMode, DEFAULT_PIXEL_FORMAT,
+    Cli, Commands, EnrollArgs, FacesCommands, KeyringCommands, OutputMode, DEFAULT_PIXEL_FORMAT,
     DEFAULT_WARMUP_FRAMES,
 };
 use crate::config as config_loader;
@@ -22,16 +23,20 @@ use crate::faces::{
     FaceComparisonConfig, FaceEnrollmentConfig, FaceExtractionConfig, FaceRemovalConfig,
 };
 use crate::output::{
-    render_error, render_face_compare, render_face_enroll, render_face_remove, render_face_success,
-    render_success,
+    render_auto_enroll, render_error, render_face_compare, render_face_enroll, render_face_remove,
+    render_face_success, render_success,
 };
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let mode = cli.output_mode();
-    init_tracing(cli.verbose, mode);
+    let Cli {
+        json,
+        verbose,
+        command,
+    } = Cli::parse();
+    let mode = OutputMode::from(json);
+    init_tracing(verbose, mode);
 
-    match run(cli, mode) {
+    match run(command, mode, verbose > 0) {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
             render_error(&err, mode);
@@ -40,8 +45,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
-    match cli.command {
+fn run(command: Commands, mode: OutputMode, verbose: bool) -> Result<(), AppError> {
+    match command {
         Commands::Capture(args) => {
             let capture_defaults = config_loader::load_capture_defaults()?;
             if args.device.is_none() && capture_defaults.device.is_none() {
@@ -68,6 +73,7 @@ fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
             let outcome = capture::run_capture(&config)?;
             render_success(&outcome, mode)?;
         }
+        Commands::Enroll(args) => run_enroll(args, mode, verbose)?,
         Commands::Faces(cmd) => match cmd {
             FacesCommands::Extract(args) => {
                 let config = FaceExtractionConfig::from(&args);
@@ -96,6 +102,12 @@ fn run(cli: Cli, mode: OutputMode) -> Result<(), AppError> {
             KeyringCommands::Check(_) => keyring::run_keyring_check(mode)?,
         },
     }
+    Ok(())
+}
+
+fn run_enroll(args: EnrollArgs, mode: OutputMode, verbose: bool) -> Result<(), AppError> {
+    let outcome = auto_enroll::run_auto_enroll(&args)?;
+    render_auto_enroll(&outcome, mode, verbose)?;
     Ok(())
 }
 

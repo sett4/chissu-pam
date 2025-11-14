@@ -15,6 +15,8 @@ struct ConfigFile {
     video_device: Option<String>,
     pixel_format: Option<String>,
     warmup_frames: Option<u32>,
+    landmark_model: Option<PathBuf>,
+    encoder_model: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -22,6 +24,12 @@ pub struct CaptureDefaults {
     pub device: Option<String>,
     pub pixel_format: Option<String>,
     pub warmup_frames: Option<u32>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct FaceModelDefaults {
+    pub landmark_model: Option<PathBuf>,
+    pub encoder_model: Option<PathBuf>,
 }
 
 pub fn resolve_store_dir(cli_value: Option<PathBuf>) -> AppResult<Option<PathBuf>> {
@@ -56,6 +64,25 @@ fn load_capture_defaults_with_sources(paths: &[PathBuf]) -> AppResult<CaptureDef
             device: file.video_device,
             pixel_format: file.pixel_format,
             warmup_frames: file.warmup_frames,
+        }),
+    )
+}
+
+pub fn load_face_model_defaults() -> AppResult<FaceModelDefaults> {
+    let sources = [
+        PathBuf::from(PRIMARY_CONFIG_PATH),
+        PathBuf::from(SECONDARY_CONFIG_PATH),
+    ];
+    load_face_model_defaults_with_sources(&sources)
+}
+
+fn load_face_model_defaults_with_sources(paths: &[PathBuf]) -> AppResult<FaceModelDefaults> {
+    Ok(
+        load_config_file(paths)?.map_or_else(FaceModelDefaults::default, |file| {
+            FaceModelDefaults {
+                landmark_model: file.landmark_model,
+                encoder_model: file.encoder_model,
+            }
         }),
     )
 }
@@ -195,5 +222,31 @@ mod tests {
             AppError::ConfigRead { path, .. } => assert_eq!(path, config_path),
             other => panic!("unexpected error: {:?}", other),
         }
+    }
+
+    #[test]
+    fn face_model_defaults_come_from_config() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(
+            &config_path,
+            "landmark_model = \"/opt/landmark.dat\"\nencoder_model = \"/opt/encoder.dat\"\n",
+        )
+        .unwrap();
+
+        let defaults = load_face_model_defaults_with_sources(&[config_path.clone()]).unwrap();
+        assert_eq!(
+            defaults,
+            FaceModelDefaults {
+                landmark_model: Some("/opt/landmark.dat".into()),
+                encoder_model: Some("/opt/encoder.dat".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn face_model_defaults_missing_config_returns_empty() {
+        let defaults = load_face_model_defaults_with_sources(&[]).unwrap();
+        assert_eq!(defaults, FaceModelDefaults::default());
     }
 }

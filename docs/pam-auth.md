@@ -31,7 +31,7 @@ sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu
    auth include system-local-login
    ```
    Place `libpam_chissu.so` near the top so a successful match shortcuts the stack. Use `required` instead of `sufficient` if you prefer to keep password fallback.
-3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/models/<user>.json` for every user that should pass facial authentication.
+3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/models/<user>.json` for every user that should pass facial authentication. You can now run `chissu-cli enroll` to capture a frame, extract descriptors, and store them in one command. It inherits the configured video device/pixel format *and* `landmark_model`/`encoder_model` paths, defaults the target user to the invoking account, and only honors `--user <name>` overrides when executed as `root`.
 4. Restart services or daemons that cache PAM state if necessary (e.g., `systemctl restart sshd`).
 
 ## Configuration
