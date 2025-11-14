@@ -23,58 +23,43 @@ The CLI SHALL let callers opt into device-provided automatic exposure and gain a
 - **THEN** it SHALL discard a configurable number of warm-up frames (default 4) before saving the final image to allow the device controls to converge.
 
 ### Requirement: Config File Capture Defaults
-The capture CLI MUST reuse the shared TOML configuration (`/etc/chissu-pam/config.toml`, `/usr/local/etc/chissu-pam/config.toml`) to resolve capture defaults whenever callers omit the corresponding CLI flags.
-#### Scenario: Config file supplies capture defaults
-- **GIVEN** `/etc/chissu-pam/config.toml` defines `video_device = "/dev/video2"`, `pixel_format = "GREY"`, and `warmup_frames = 10`
-- **AND** the operator runs `chissu-cli capture` without `--device`, `--pixel-format`, or `--warmup-frames`
-- **THEN** the CLI uses `/dev/video2`, `GREY`, and `10` during capture negotiation
-- **AND** the human and JSON outputs report those resolved values.
+The shared configuration and built-in defaults MUST remain canonical inside `capture-cli` so that any capture capability referencing this requirement automatically inherits the same resolution order.
 
-#### Scenario: CLI flags override config
-- **GIVEN** the config file defines `video_device = "/dev/video2"`
-- **WHEN** the operator runs `chissu-cli capture --device /dev/video4`
-- **THEN** the CLI captures from `/dev/video4` regardless of the config value and records that override in its logs/output.
-
-#### Scenario: Built-in defaults still apply
-- **WHEN** neither configuration file exists or the relevant keys are absent
-- **AND** the operator omits the corresponding CLI flags
-- **THEN** the CLI defaults to `/dev/video0` (index 0), pixel format `Y16`, and four warm-up frames
-- **AND** it logs that the built-in defaults were used.
+#### Scenario: Infrared capture references shared defaults
+- **GIVEN** the `infrared-capture` capability defers to `capture-cli` for resolving devices and warm-up frames
+- **WHEN** the operator runs `chissu-cli capture` without overriding these flags
+- **THEN** the command applies `/dev/video0`, `Y16`, and four warm-up frames based on the shared behavior requirement and reports the resolved values in both human-readable and JSON outputs.
 
 ### Requirement: CLI Binary Naming
-The workspace MUST emit a `chissu-cli` binary for the capture tool whenever the root crate is built.
+The workspace MUST continue to emit a `chissu-cli` binary name for all build profiles so capability-focused specs remain accurate regardless of how many capture modes exist.
 
-#### Scenario: Release build produces chissu-cli
-- **WHEN** a maintainer runs `cargo build --release`
-- **THEN** the build outputs `target/release/chissu-cli`
-- **AND** no `chissu-pam` binary artifact remains in the `target` directory.
-
-#### Scenario: Debug build produces chissu-cli
-- **WHEN** a maintainer runs `cargo build`
-- **THEN** the build outputs `target/debug/chissu-cli`
-- **AND** the binary's `--help` banner introduces the tool as `chissu-cli`.
-
-#### Scenario: Workspace run targets the CLI package
-- **WHEN** a maintainer runs `cargo run -p chissu-cli -- --help` from the repository root
-- **THEN** Cargo resolves the package under `crates/chissu-cli/`
-- **AND** the command prints the CLI usage banner without requiring a legacy root crate.
+#### Scenario: Future capture modes reuse binary naming
+- **GIVEN** maintainers add a new capture capability (e.g., RGB capture)
+- **WHEN** they build the workspace in debug or release mode
+- **THEN** the resulting binary remains `chissu-cli`, ensuring documentation in sibling specs stays correct without additional edits.
 
 ### Requirement: Secret Service Diagnostics Command
-The capture CLI MUST provide a subcommand that verifies Secret Service availability via the `keyring` crate, mirroring the PAM module's behavior.
+The Secret Service diagnostic subcommand MUST remain defined in this capability even when other capture modes are introduced, and sibling specs SHALL reference it instead of redefining command semantics.
 
-#### Scenario: Human-readable success output
-- **WHEN** an operator runs `chissu-cli keyring check`
-- **AND** the keyring probe reaches the default Secret Service collection for the invoking user (even if no entry exists yet)
-- **THEN** the command exits with status `0`
-- **AND** it prints a confirmation message that includes the probed user/service.
+#### Scenario: Infrared spec links to diagnostics
+- **GIVEN** operators follow the `infrared-capture` documentation to verify their environment
+- **WHEN** they run `chissu-cli keyring check`
+- **THEN** the diagnostic behavior is defined only once in `capture-cli`, and the infrared spec simply references it rather than redefining command semantics.
 
-#### Scenario: JSON output for automation
-- **WHEN** the operator passes `--json` to the check command
-- **THEN** the CLI emits a JSON object containing the service, user, `status` field (`"ok"` or `"error"`), and an `error` message when applicable
-- **SO** scripts can parse the result without scraping text.
+### Requirement: Shared Capture CLI Behavior
+Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors that live in the `capture-cli` capability: built-in defaults (device `/dev/video0`, pixel format `Y16`, four warm-up frames), config-file overrides, warm-up frame discarding, and dual output modes (`--json` vs human-readable).
 
-#### Scenario: Failures propagate reason and non-zero exit
-- **WHEN** the keyring probe encounters a locked keyring, missing DBus session, or other error
-- **THEN** the command exits with a non-zero status (e.g., `2`)
-- **AND** it surfaces the underlying keyring error message in both human-readable and JSON modes.
+#### Scenario: Any capture mode honors shared defaults
+- **GIVEN** `chissu-cli capture --json` is invoked without explicit `--device`, `--pixel-format`, or `--warmup-frames`
+- **WHEN** the capability referenced by the command needs those values
+- **THEN** the CLI resolves them using the shared default/config logic defined in `capture-cli`
+- **AND** any capability-specific spec (e.g., `infrared-capture`) may only override values it explicitly documents.
+
+### Requirement: Capture CLI Capability Scope Declaration
+The `capture-cli` spec MUST describe itself as the home for cross-cutting capture behaviors (controls, diagnostics, binary naming) so other capability specs can reference it instead of re-stating shared rules.
+
+#### Scenario: Linked capability identifies shared owner
+- **GIVEN** another capability (e.g., `infrared-capture`) needs the CLI logging, auto control toggles, or diagnostic subcommands
+- **WHEN** contributors look up where to document or modify those behaviors
+- **THEN** the `capture-cli` spec explicitly states it owns them and points to the relevant requirements (auto controls, config defaults, keyring diagnostics, binary naming).
 
