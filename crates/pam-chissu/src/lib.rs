@@ -30,6 +30,7 @@ use thiserror::Error;
 
 type PamResult<T> = Result<T, AuthError>;
 
+const SYSLOG_IDENTIFIER: &str = "pam_chissu";
 const PRIMARY_CONFIG_PATH: &str = "/etc/chissu-pam/config.toml";
 const SECONDARY_CONFIG_PATH: &str = "/usr/local/etc/chissu-pam/config.toml";
 const DEFAULT_THRESHOLD: f64 = 0.7;
@@ -236,16 +237,20 @@ struct PamLogger {
 
 impl PamLogger {
     fn new(service: &str) -> Self {
-        let formatter = Formatter3164 {
-            facility: Facility::LOG_AUTHPRIV,
-            hostname: None,
-            process: "pam_chissu".into(),
-            pid: 0,
-        };
+        let formatter = Self::formatter();
         let logger = syslog::unix(formatter.clone()).ok();
         Self {
             service: service.to_string(),
             logger,
+        }
+    }
+
+    fn formatter() -> Formatter3164 {
+        Formatter3164 {
+            facility: Facility::LOG_AUTHPRIV,
+            hostname: None,
+            process: SYSLOG_IDENTIFIER.into(),
+            pid: 0,
         }
     }
 
@@ -273,7 +278,7 @@ impl PamLogger {
         if let Some(logger) = self.logger.as_mut() {
             let _ = emit(logger, &formatted);
         } else {
-            eprintln!("pam_chissu {level}: {formatted}");
+            eprintln!("{SYSLOG_IDENTIFIER} {level}: {formatted}");
         }
     }
 }
@@ -939,5 +944,11 @@ mod tests {
         assert!(entries[0].1.contains("succeeded"));
         assert_eq!(entries[1].0, PamMessageStyle::ERROR_MSG);
         assert!(entries[1].1.contains("failed"));
+    }
+
+    #[test]
+    fn pam_logger_formatter_uses_syslog_identifier() {
+        let formatter = PamLogger::formatter();
+        assert_eq!(formatter.process, SYSLOG_IDENTIFIER);
     }
 }

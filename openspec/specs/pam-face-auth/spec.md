@@ -21,6 +21,11 @@ The system MUST provide a shared library for PAM authentication named `libpam_ch
 - **THEN** the directory contains `libpam_chissu.so` (and Cargo’s usual metadata files) but **NOT** `libpam_chissuauth.so`
 - **SO** installation and packaging steps always pick the single supported module name without relying on deprecated symlinks.
 
+#### Scenario: Identifier constant reused for every logging sink
+- **WHEN** the module configures syslog (`Formatter3164.process`) or falls back to printing errors on stderr/stdout
+- **THEN** all of those code paths pull the identifier from a single constant declared inside the crate (e.g., `SYSLOG_IDENTIFIER`)
+- **SO** any future logging destination or refactor remains tied to the required `pam_chissu` value without duplicating literals that could drift.
+
 ### Requirement: Configurable Similarity And Capture Parameters
 The module MUST load operational parameters from TOML configuration files and honour documented defaults when no configuration file is present.
 
