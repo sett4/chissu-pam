@@ -57,7 +57,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## 運用・技術制約
 
 - 対象 OS は V4L2 をサポートする Linux ディストリビューション(推奨: Debian/Ubuntu 系)とする。
-- Rust 1.80 以上、主要クレートは `v4l`, `clap`, `serde`, `serde_json`, `image` を採用し、ライセンス互換性を確認する。
+- Edition 2024 をサポートした Rust 1.85 以上、主要クレートは `v4l`, `clap`, `serde`, `serde_json`, `image` を採用し、ライセンス互換性を確認する。
 - IR 対応 Web カメラを前提とし、必要に応じて IR フィルタの有無や外部照射装置をドキュメント化する。
 - 出力ファイルは既定で `./captures/` に保存し、1 ファイルあたり最大 500MB を超えないようローテーションまたは圧縮を検討する。
 
