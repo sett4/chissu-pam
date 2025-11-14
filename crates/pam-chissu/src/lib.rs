@@ -29,6 +29,8 @@ use thiserror::Error;
 type PamResult<T> = Result<T, AuthError>;
 
 const SYSLOG_IDENTIFIER: &str = "pam_chissu";
+const SECRET_SERVICE_FALLBACK_PROMPT: &str =
+    "Face authentication unavailable. Falling back to password.";
 
 #[derive(Debug, Error)]
 enum AuthError {
@@ -272,13 +274,7 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     let outcome = match authenticate_user(&request, &mut logger, &mut messenger) {
         Ok(result) => result,
         Err(AuthError::SecretServiceUnavailable(reason)) => {
-            let message =
-                format!("Secret Service unavailable; skipping face authentication: {reason}");
-            logger.warn(&message);
-            messenger.send_error_msg(
-                &mut logger,
-                &format!("Secret Service unavailable ({reason}); skipping face authentication.",),
-            );
+            notify_secret_service_unavailable(&reason, &mut logger, &mut messenger);
             return PamReturnCode::IGNORE as c_int;
         }
         Err(err) => {
@@ -622,6 +618,17 @@ fn load_descriptor_store(
     }
 }
 
+fn notify_secret_service_unavailable(
+    reason: &str,
+    logger: &mut PamLogger,
+    messenger: &mut PamConversationMessenger,
+) {
+    logger.info(&format!(
+        "Secret Service unavailable; skipping face authentication: {reason}"
+    ));
+    messenger.send_error_msg(logger, SECRET_SERVICE_FALLBACK_PROMPT);
+}
+
 fn load_config() -> PamResult<ResolvedConfigWithSource> {
     chissu_config::load_resolved_config().map_err(map_config_error)
 }
@@ -850,6 +857,20 @@ mod tests {
         assert!(entries[0].1.contains("succeeded"));
         assert_eq!(entries[1].0, PamMessageStyle::ERROR_MSG);
         assert!(entries[1].1.contains("failed"));
+    }
+
+    #[test]
+    fn secret_service_unavailable_prompt_is_concise() {
+        conversation_log().lock().unwrap().clear();
+        let mut messenger = PamConversationMessenger::from_callback(recording_conv);
+        let mut logger = PamLogger::new("test-service");
+
+        notify_secret_service_unavailable("locked", &mut logger, &mut messenger);
+
+        let entries = conversation_log().lock().unwrap().clone();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, PamMessageStyle::ERROR_MSG);
+        assert_eq!(entries[0].1, SECRET_SERVICE_FALLBACK_PROMPT);
     }
 
     #[test]
