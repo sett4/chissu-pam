@@ -65,36 +65,54 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
    sudo install -m 0755 target/release/chissu-cli /usr/local/bin/chissu-cli
    ```
 
-3. **Install the PAM module**:
+3. **Create Model dir**:
+
+   ```bash
+   sudo mkdir -p /var/lib/chissu-pam/models
+   sudo chmod 0666 /var/lib/chissu-pam/models
+
+   sudo mkdir -p /var/lib/chissu-pam/dllib-models
+   sudo curl https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 -o /var/lib/chissu-pam/dllib-models/shape_predictor_68_face_landmarks.dat.bz2
+   sudo curl https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2 -o /var/lib/chissu-pam/dllib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
+   sudo bunzip2 /var/lib/chissu-pam/dllib-models/shape_predictor_68_face_landmarks.dat.bz2 /var/lib/chissu-pam/dllib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
+   ```
+
+4. **Install the PAM module**:
 
    ```bash
    sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
    ```
 
-4. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `descriptor_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
+5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `descriptor_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
 
-5. **Store dlib weights** under a readable directory (for example `/etc/chissu-pam/models`) and update the config or environment variables so both CLI and PAM know where to load them.
+6. **Store dlib weights** under a readable directory (for example `/var/lib/chissu-pam/dllib-models`) and update the config or environment variables so both CLI and PAM know where to load them.
 
-6. **Wire PAM** by editing the relevant `/etc/pam.d/<service>` entry:
+7. **Wire PAM** by editing the relevant `/etc/pam.d/<service>` entry:
 
    ```text
-   auth    sufficient    libpam_chissu.so
+   auth    sufficient      /usr/lib/security/libpam_chissu.so
    ```
 
    Keep your existing `auth` stack intact—this module augments, not replaces, other factors.
 
-7. **Verify Secret Service access** for each user who will authenticate:
+8. **Verify Secret Service access** for each user who will authenticate:
 
    ```bash
    chissu-cli keyring check --json || echo "Secret Service is locked"
    ```
 
-8. **Test locally** before touching production logins:
+9. **Test locally** before touching production logins:
 
    ```bash
    cargo test --workspace
    chissu-cli capture --json | jq
    ```
+
+10. **sudo**:
+
+    ```bash
+    sudo echo test chissu-pam
+    ```
 
 ## Workspace layout
 
@@ -127,84 +145,21 @@ cargo build
 Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes descriptors, encrypts them via Secret Service–managed AES-GCM keys, and deletes the temporary capture + descriptor files once enrollment succeeds.
 
 ```bash
-chissu-cli enroll \
-  --landmark-model /etc/chissu-pam/models/shape_predictor_68_face_landmarks.dat \
-  --encoder-model /etc/chissu-pam/models/dlib_face_recognition_resnet_model_v1.dat
+chissu-cli enroll
 ```
 
 - Target user defaults to the invoking account and does **not** require `sudo`. Because Secret Service runs in your desktop session, the CLI can request the descriptor key, encrypt the updated store, and return status without elevated privileges.
 - Use `--device /dev/video2` when you need to override the configured device, `--store-dir <path>` to bypass the config file, and `--jitters`, `--landmark-model`, `--encoder-model` to fine-tune extraction just like `faces extract`.
 - Model paths (`landmark_model`, `encoder_model`) inherit from `/etc/chissu-pam/config.toml` when present, fall back to `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`, and only then require explicit CLI flags.
-- `--json` mirrors the `faces enroll` payload (`user`, `store_path`, `added`) and appends capture metadata so automation can persist auditing data:
-
-```json
-{
-  "user": "alice",
-  "target_user": "alice",
-  "store_path": "/var/lib/chissu-pam/models/alice.json",
-  "added": [
-    {
-      "id": "7ae5d0e0-76d6-46f1-9ff4-c0cfd83a9a5a",
-      "descriptor_len": 128,
-      "source": "captures/auto-enroll/features-20251114T180102.101Z.json",
-      "created_at": "2025-11-14T18:01:02.134Z"
-    }
-  ],
-  "descriptor_ids": ["7ae5d0e0-76d6-46f1-9ff4-c0cfd83a9a5a"],
-  "captured_image": "captures/auto-enroll/capture-20251114T180102.101Z.png",
-  "captured_image_deleted": true,
-  "descriptor_file_deleted": true,
-  "faces_detected": 1
-}
-```
 
 Need to enroll another user’s descriptors? Elevate just for that command so you can reach their Secret Service session and descriptor store:
 
 ```bash
-sudo --preserve-env=DLIB_LANDMARK_MODEL,DLIB_ENCODER_MODEL \
-  chissu-cli enroll --user bob \
-  --landmark-model /etc/chissu-pam/models/shape_predictor_68_face_landmarks.dat \
-  --encoder-model /etc/chissu-pam/models/dlib_face_recognition_resnet_model_v1.dat
+sudo \
+  chissu-cli enroll --user bob
 ```
 
 `sudo` is required because `/var/lib/chissu-pam/models/bob.json` is root-owned. The helper still talks to Bob’s Secret Service instance and refuses to enroll if it cannot obtain the AES-GCM key or if the service is locked.
-
-### Face feature enrollment
-
-Register descriptor vectors with a specific Linux user so the planned PAM module can perform facial authentication. Point the command at a descriptor JSON exported by `faces extract`:
-
-```bash
-cargo run -p chissu-cli -- faces enroll --user alice captures/features/reference.json
-```
-
-Each descriptor receives a unique identifier and is appended to `/var/lib/chissu-pam/models/alice.json` by default (created automatically with `0600` permissions). The CLI now generates or rotates a 32-byte AES-256-GCM key for the user, registers it with Secret Service (`service = chissu-pam`, `user = <pam user>`), decrypts any existing store, and rewrites the updated store in encrypted form. Legacy plaintext stores are migrated automatically the first time you run the command after upgrading. The decrypted content remains the same JSON array you are used to (descriptor vector, bounding box, source file, creation timestamp, and stable ID), but it now lives inside an encrypted wrapper on disk.
-
-Pass `--json` to receive a payload that lists the generated descriptor IDs and the feature-store path. Use `--store-dir <path>` to override the storage directory explicitly. When the flag is omitted, the CLI reads `descriptor_store_dir` from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml`), then consults the `CHISSU_PAM_STORE_DIR` environment variable, and finally falls back to the built-in `/var/lib/chissu-pam/models/` location. Remember that the Secret Service daemon for the target user must be reachable during enrollment so the key rotation succeeds.
-
-- Missing or unreadable descriptor files exit with status code `2`.
-- Malformed payloads or empty descriptor lists exit with status code `3` and leave the store untouched.
-- Descriptor length mismatches between the payload and the existing store also exit with status code `3`.
-
-### Face feature removal
-
-Remove descriptors from the store when they are no longer valid:
-
-```bash
-# Remove a specific descriptor by ID
-auth_id=$(cargo run -p chissu-cli -- faces enroll --user alice captures/features/reference.json --json | jq -r ".added[0].id")
-cargo run -p chissu-cli -- faces remove --user alice --descriptor-id "$auth_id"
-
-# Remove every descriptor for a user
-cargo run -p chissu-cli -- faces remove --user alice --all
-
-# Work against a non-default store directory
-cargo run -p chissu-cli -- faces enroll --user alice --store-dir ./captures/enrolled captures/features/reference.json
-cargo run -p chissu-cli -- faces remove --user alice --descriptor-id "$auth_id" --store-dir ./captures/enrolled
-```
-
-The command reports the IDs that were deleted and the number of descriptors that remain. With `--json` it emits a structured summary containing `removed_ids`, `remaining`, and the target store path. Attempting to delete an unknown ID exits with status code `4`, leaving the store unchanged. Using `--all` deletes the store file entirely (or treats the operation as a no-op when the user has no enrolled descriptors). Behind the scenes the CLI fetches the user’s AES-GCM key from Secret Service, decrypts the store, removes the requested records, and re-encrypts the result with the same key so PAM continues to read the file.
-
-When neither command receives `--store-dir`, they inherit the same precedence chain described for enrollment (config files, then `CHISSU_PAM_STORE_DIR`, then the built-in path), keeping CLI operations aligned with the PAM module configuration.
 
 ### PAM facial authentication
 
