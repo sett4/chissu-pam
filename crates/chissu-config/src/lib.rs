@@ -22,7 +22,7 @@ pub struct ConfigFile {
     pub similarity_threshold: Option<f64>,
     pub capture_timeout_secs: Option<u64>,
     pub frame_interval_millis: Option<u64>,
-    pub descriptor_store_dir: Option<PathBuf>,
+    pub embedding_store_dir: Option<PathBuf>,
     pub video_device: Option<String>,
     pub pixel_format: Option<String>,
     pub warmup_frames: Option<u32>,
@@ -37,7 +37,7 @@ pub struct ResolvedConfig {
     pub similarity_threshold: f64,
     pub capture_timeout: Duration,
     pub frame_interval: Duration,
-    pub descriptor_store_dir: PathBuf,
+    pub embedding_store_dir: PathBuf,
     pub video_device: String,
     pub pixel_format: String,
     pub warmup_frames: u32,
@@ -61,8 +61,8 @@ impl ResolvedConfig {
             frame_interval: Duration::from_millis(
                 raw.frame_interval_millis.unwrap_or(DEFAULT_INTERVAL_MILLIS),
             ),
-            descriptor_store_dir: raw
-                .descriptor_store_dir
+            embedding_store_dir: raw
+                .embedding_store_dir
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_STORE_DIR)),
             video_device: raw
                 .video_device
@@ -223,7 +223,7 @@ mod tests {
     fn parse_errors_are_reported() {
         let dir = tempdir().unwrap();
         let broken = dir.path().join("broken.toml");
-        fs::write(&broken, "descriptor_store_dir = { invalid = true }").unwrap();
+        fs::write(&broken, "embedding_store_dir = { invalid = true }").unwrap();
 
         let err = load_from_paths(&[broken.clone()]).unwrap_err();
         match err {

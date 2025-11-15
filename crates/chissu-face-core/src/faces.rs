@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use crate::errors::{AppError, AppResult};
 use crate::secret_service::{
-    fetch_descriptor_key, generate_descriptor_key, store_descriptor_key, DescriptorKey,
-    DescriptorKeyStatus,
+    fetch_embedding_key, generate_embedding_key, store_embedding_key, EmbeddingKey,
+    EmbeddingKeyStatus,
 };
 
 const LANDMARK_ENV: &str = "DLIB_LANDMARK_MODEL";
@@ -52,38 +52,38 @@ pub struct FaceComparisonConfig {
 #[derive(Debug, Clone)]
 pub struct FaceEnrollmentConfig {
     pub user: String,
-    pub descriptor: PathBuf,
+    pub embedding: PathBuf,
     pub store_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FaceRemovalConfig {
     pub user: String,
-    pub descriptor_ids: Vec<String>,
+    pub embedding_ids: Vec<String>,
     pub remove_all: bool,
     pub store_dir: Option<PathBuf>,
 }
 
-pub(crate) trait DescriptorKeyBackend {
-    fn fetch(&self, user: &str) -> AppResult<DescriptorKeyStatus>;
+pub(crate) trait EmbeddingKeyBackend {
+    fn fetch(&self, user: &str) -> AppResult<EmbeddingKeyStatus>;
     fn store(&self, user: &str, key: &[u8]) -> AppResult<()>;
-    fn generate(&self) -> DescriptorKey;
+    fn generate(&self) -> EmbeddingKey;
 }
 
 #[derive(Clone, Copy, Default)]
-struct SecretServiceDescriptorKeyBackend;
+struct SecretServiceEmbeddingKeyBackend;
 
-impl DescriptorKeyBackend for SecretServiceDescriptorKeyBackend {
-    fn fetch(&self, user: &str) -> AppResult<DescriptorKeyStatus> {
-        fetch_descriptor_key(user).map_err(AppError::from)
+impl EmbeddingKeyBackend for SecretServiceEmbeddingKeyBackend {
+    fn fetch(&self, user: &str) -> AppResult<EmbeddingKeyStatus> {
+        fetch_embedding_key(user).map_err(AppError::from)
     }
 
     fn store(&self, user: &str, key: &[u8]) -> AppResult<()> {
-        store_descriptor_key(user, key).map_err(AppError::from)
+        store_embedding_key(user, key).map_err(AppError::from)
     }
 
-    fn generate(&self) -> DescriptorKey {
-        generate_descriptor_key()
+    fn generate(&self) -> EmbeddingKey {
+        generate_embedding_key()
     }
 }
 
@@ -136,9 +136,10 @@ pub struct BoundingBox {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FaceDescriptorRecord {
+pub struct FaceEmbeddingRecord {
     pub bounding_box: BoundingBox,
-    pub descriptor: Vec<f64>,
+    #[serde(rename = "embedding")]
+    pub embedding: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,7 +148,7 @@ pub struct FaceExtractionSummary {
     pub image_path: String,
     pub output_path: String,
     pub num_faces: usize,
-    pub faces: Vec<FaceDescriptorRecord>,
+    pub faces: Vec<FaceEmbeddingRecord>,
     pub landmark_model: String,
     pub encoder_model: String,
     pub num_jitters: u32,
@@ -174,9 +175,10 @@ pub struct FaceComparisonOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct EnrolledDescriptor {
+pub struct EnrolledEmbedding {
     pub id: String,
-    pub descriptor: Vec<f64>,
+    #[serde(rename = "embedding")]
+    pub embedding: Vec<f64>,
     pub bounding_box: BoundingBox,
     pub source: String,
     pub created_at: String,
@@ -185,7 +187,8 @@ pub struct EnrolledDescriptor {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct EnrollmentRecord {
     pub id: String,
-    pub descriptor_len: usize,
+    #[serde(rename = "embedding_len")]
+    pub embedding_len: usize,
     pub source: String,
     pub created_at: String,
 }
@@ -244,8 +247,8 @@ pub fn run_face_extraction_with_backend<B: FaceEmbeddingBackend>(
     logs.push(format!("Detected {} face(s)", faces.len()));
     if let Some(first) = faces.first() {
         logs.push(format!(
-            "Descriptor vector length: {}",
-            first.descriptor.len()
+            "Embedding vector length: {}",
+            first.embedding.len()
         ));
     }
 
@@ -266,10 +269,7 @@ pub fn run_face_extraction_with_backend<B: FaceEmbeddingBackend>(
     };
 
     persist_summary(&summary, &output_path)?;
-    logs.push(format!(
-        "Saved descriptor data to {}",
-        output_path.display()
-    ));
+    logs.push(format!("Saved embedding data to {}", output_path.display()));
 
     Ok(FaceExtractionOutcome { summary, logs })
 }
@@ -309,7 +309,7 @@ pub fn run_face_comparison(config: &FaceComparisonConfig) -> AppResult<FaceCompa
             return Err(AppError::InvalidFeatureFile {
                 path: target.to_path_buf(),
                 message: format!(
-                    "descriptor length mismatch: expected {input_dim} values, found {target_dim}"
+                    "embedding length mismatch: expected {input_dim} values, found {target_dim}"
                 ),
             });
         }
@@ -351,10 +351,10 @@ pub fn run_face_comparison(config: &FaceComparisonConfig) -> AppResult<FaceCompa
 }
 
 pub fn run_face_enrollment(config: &FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome> {
-    run_face_enrollment_with_backend(config, &SecretServiceDescriptorKeyBackend)
+    run_face_enrollment_with_backend(config, &SecretServiceEmbeddingKeyBackend)
 }
 
-pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
+pub(crate) fn run_face_enrollment_with_backend<B: EmbeddingKeyBackend>(
     config: &FaceEnrollmentConfig,
     backend: &B,
 ) -> AppResult<FaceEnrollmentOutcome> {
@@ -362,35 +362,35 @@ pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
 
     let mut logs = Vec::new();
     logs.push(format!(
-        "Loading descriptor payload from {}",
-        config.descriptor.display()
+        "Loading embedding payload from {}",
+        config.embedding.display()
     ));
 
-    let summary = load_summary(&config.descriptor)
-        .map_err(|err| map_to_descriptor_validation(&config.descriptor, err))?;
-    let descriptor_len = ensure_valid_faces(&summary.faces, &config.descriptor)
-        .map_err(|err| map_to_descriptor_validation(&config.descriptor, err))?;
+    let summary = load_summary(&config.embedding)
+        .map_err(|err| map_to_embedding_validation(&config.embedding, err))?;
+    let embedding_len = ensure_valid_faces(&summary.faces, &config.embedding)
+        .map_err(|err| map_to_embedding_validation(&config.embedding, err))?;
     logs.push(format!(
-        "Validated {} descriptor(s) with length {}",
+        "Validated {} embedding(s) with length {}",
         summary.faces.len(),
-        descriptor_len
+        embedding_len
     ));
 
     let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
     let fetched_key = backend.fetch(&config.user)?;
     let current_key: Option<Vec<u8>> = match fetched_key {
-        DescriptorKeyStatus::Present(key) => Some(key.into_bytes()),
-        DescriptorKeyStatus::Missing => None,
+        EmbeddingKeyStatus::Present(key) => Some(key.into_bytes()),
+        EmbeddingKeyStatus::Missing => None,
     };
 
     let mut existing = read_enrolled_store(&store_path, current_key.as_deref())?;
 
-    if let Some(current_len) = existing.first().map(|entry| entry.descriptor.len()) {
-        if current_len != descriptor_len {
-            return Err(AppError::DescriptorValidation {
+    if let Some(current_len) = existing.first().map(|entry| entry.embedding.len()) {
+        if current_len != embedding_len {
+            return Err(AppError::EmbeddingValidation {
                 path: store_path.clone(),
                 message: format!(
-                    "descriptor length mismatch with existing store (expected {current_len}, found {descriptor_len})"
+                    "embedding length mismatch with existing store (expected {current_len}, found {embedding_len})"
                 ),
             });
         }
@@ -400,18 +400,18 @@ pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
     for face in &summary.faces {
         let id = Uuid::new_v4().to_string();
         let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-        let record = EnrolledDescriptor {
+        let record = EnrolledEmbedding {
             id: id.clone(),
-            descriptor: face.descriptor.clone(),
+            embedding: face.embedding.clone(),
             bounding_box: face.bounding_box.clone(),
-            source: config.descriptor.display().to_string(),
+            source: config.embedding.display().to_string(),
             created_at: created_at.clone(),
         };
         existing.push(record);
         added.push(EnrollmentRecord {
             id,
-            descriptor_len,
-            source: config.descriptor.display().to_string(),
+            embedding_len: embedding_len,
+            source: config.embedding.display().to_string(),
             created_at,
         });
     }
@@ -421,13 +421,13 @@ pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
     backend.store(&config.user, new_key.as_bytes())?;
 
     logs.push(format!(
-        "Enrolled {} descriptor(s) for user {}",
+        "Enrolled {} embedding(s) for user {}",
         added.len(),
         config.user
     ));
     logs.push(format!("Feature store: {}", store_path.display()));
     logs.push(format!(
-        "Rotated Secret Service descriptor key for user {}",
+        "Rotated Secret Service embedding key for user {}",
         config.user
     ));
 
@@ -440,10 +440,10 @@ pub(crate) fn run_face_enrollment_with_backend<B: DescriptorKeyBackend>(
 }
 
 pub fn run_face_removal(config: &FaceRemovalConfig) -> AppResult<FaceRemovalOutcome> {
-    run_face_removal_with_backend(config, &SecretServiceDescriptorKeyBackend)
+    run_face_removal_with_backend(config, &SecretServiceEmbeddingKeyBackend)
 }
 
-pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
+pub(crate) fn run_face_removal_with_backend<B: EmbeddingKeyBackend>(
     config: &FaceRemovalConfig,
     backend: &B,
 ) -> AppResult<FaceRemovalOutcome> {
@@ -453,13 +453,13 @@ pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
     let store_path = user_store_path(config.store_dir.as_deref(), &config.user);
     let fetched_key = backend.fetch(&config.user)?;
     let key_bytes: Option<Vec<u8>> = match fetched_key {
-        DescriptorKeyStatus::Present(key) => Some(key.into_bytes()),
-        DescriptorKeyStatus::Missing => None,
+        EmbeddingKeyStatus::Present(key) => Some(key.into_bytes()),
+        EmbeddingKeyStatus::Missing => None,
     };
 
     let existing = read_enrolled_store(&store_path, key_bytes.as_deref())?;
     logs.push(format!(
-        "Loaded {} descriptor(s) for user {}",
+        "Loaded {} embedding(s) for user {}",
         existing.len(),
         config.user
     ));
@@ -475,7 +475,7 @@ pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
                 source,
             })?;
         }
-        logs.push(format!("Removed all descriptors for user {}", config.user));
+        logs.push(format!("Removed all embeddings for user {}", config.user));
         return Ok(FaceRemovalOutcome {
             user: config.user.clone(),
             store_path,
@@ -487,15 +487,15 @@ pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
     }
 
     if existing.is_empty() {
-        if let Some(first) = config.descriptor_ids.first() {
-            return Err(AppError::DescriptorNotFound {
+        if let Some(first) = config.embedding_ids.first() {
+            return Err(AppError::EmbeddingNotFound {
                 user: config.user.clone(),
-                descriptor_id: first.clone(),
+                embedding_id: first.clone(),
             });
         }
     }
 
-    let requested: HashSet<String> = config.descriptor_ids.iter().cloned().collect();
+    let requested: HashSet<String> = config.embedding_ids.iter().cloned().collect();
     let mut retained = Vec::with_capacity(existing.len());
     let mut removed_ids = Vec::new();
 
@@ -510,21 +510,21 @@ pub(crate) fn run_face_removal_with_backend<B: DescriptorKeyBackend>(
     if removed_ids.len() != requested.len() {
         let removed_set: HashSet<&String> = removed_ids.iter().collect();
         if let Some(missing) = requested.iter().find(|id| !removed_set.contains(id)) {
-            return Err(AppError::DescriptorNotFound {
+            return Err(AppError::EmbeddingNotFound {
                 user: config.user.clone(),
-                descriptor_id: missing.clone(),
+                embedding_id: missing.clone(),
             });
         }
     }
 
     write_enrolled_store(&store_path, &retained, key_bytes.as_deref())?;
     logs.push(format!(
-        "Removed {} descriptor(s) for user {}",
+        "Removed {} embedding(s) for user {}",
         removed_ids.len(),
         config.user
     ));
     logs.push(format!(
-        "Feature store now contains {} descriptor(s)",
+        "Feature store now contains {} embedding(s)",
         retained.len()
     ));
 
@@ -550,7 +550,7 @@ pub fn load_summary(path: &Path) -> AppResult<FaceExtractionSummary> {
 
 pub fn write_enrolled_store(
     path: &Path,
-    descriptors: &[EnrolledDescriptor],
+    embeddings: &[EnrolledEmbedding],
     key: Option<&[u8]>,
 ) -> AppResult<()> {
     if let Some(parent) = path.parent() {
@@ -571,9 +571,9 @@ pub fn write_enrolled_store(
         {
             let mut writer = BufWriter::new(&mut *file);
             let serialized = if let Some(key_bytes) = key {
-                serialize_encrypted_store(descriptors, key_bytes)?
+                serialize_encrypted_store(embeddings, key_bytes)?
             } else {
-                serde_json::to_vec_pretty(descriptors)?
+                serde_json::to_vec_pretty(embeddings)?
             };
             writer
                 .write_all(&serialized)
@@ -619,18 +619,16 @@ pub fn write_enrolled_store(
     Ok(())
 }
 
-fn serialize_encrypted_store(descriptors: &[EnrolledDescriptor], key: &[u8]) -> AppResult<Vec<u8>> {
-    let plaintext = serde_json::to_vec(descriptors)?;
+fn serialize_encrypted_store(embeddings: &[EnrolledEmbedding], key: &[u8]) -> AppResult<Vec<u8>> {
+    let plaintext = serde_json::to_vec(embeddings)?;
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| AppError::Encryption("invalid AES-GCM key length".into()))?;
     let mut nonce = [0u8; STORE_NONCE_LEN];
     OsRng.fill_bytes(&mut nonce);
     let ciphertext = cipher
         .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
-        .map_err(|err| {
-            AppError::Encryption(format!("failed to encrypt descriptor store: {err}"))
-        })?;
-    let wrapper = EncryptedDescriptorStore {
+        .map_err(|err| AppError::Encryption(format!("failed to encrypt embedding store: {err}")))?;
+    let wrapper = EncryptedEmbeddingStore {
         version: STORE_VERSION,
         algorithm: STORE_ALGORITHM.to_string(),
         nonce: general_purpose::STANDARD.encode(nonce),
@@ -639,7 +637,7 @@ fn serialize_encrypted_store(descriptors: &[EnrolledDescriptor], key: &[u8]) -> 
     serde_json::to_vec_pretty(&wrapper).map_err(AppError::from)
 }
 
-pub fn read_enrolled_store(path: &Path, key: Option<&[u8]>) -> AppResult<Vec<EnrolledDescriptor>> {
+pub fn read_enrolled_store(path: &Path, key: Option<&[u8]>) -> AppResult<Vec<EnrolledEmbedding>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -649,7 +647,7 @@ pub fn read_enrolled_store(path: &Path, key: Option<&[u8]>) -> AppResult<Vec<Enr
         source,
     })?;
 
-    if let Ok(wrapper) = serde_json::from_slice::<EncryptedDescriptorStore>(&data) {
+    if let Ok(wrapper) = serde_json::from_slice::<EncryptedEmbeddingStore>(&data) {
         return decrypt_encrypted_store(path, wrapper, key);
     }
 
@@ -661,18 +659,18 @@ pub fn read_enrolled_store(path: &Path, key: Option<&[u8]>) -> AppResult<Vec<Enr
 
 fn decrypt_encrypted_store(
     path: &Path,
-    wrapper: EncryptedDescriptorStore,
+    wrapper: EncryptedEmbeddingStore,
     key: Option<&[u8]>,
-) -> AppResult<Vec<EnrolledDescriptor>> {
+) -> AppResult<Vec<EnrolledEmbedding>> {
     if wrapper.algorithm != STORE_ALGORITHM {
         return Err(AppError::Encryption(format!(
-            "unsupported descriptor store algorithm '{}'",
+            "unsupported embedding store algorithm '{}'",
             wrapper.algorithm
         )));
     }
     if wrapper.version != STORE_VERSION {
         return Err(AppError::Encryption(format!(
-            "unsupported descriptor store version {}",
+            "unsupported embedding store version {}",
             wrapper.version
         )));
     }
@@ -700,9 +698,7 @@ fn decrypt_encrypted_store(
         .map_err(|_| AppError::Encryption("invalid AES-GCM key length".into()))?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
-        .map_err(|err| {
-            AppError::Encryption(format!("failed to decrypt descriptor store: {err}"))
-        })?;
+        .map_err(|err| AppError::Encryption(format!("failed to decrypt embedding store: {err}")))?;
 
     serde_json::from_slice(&plaintext).map_err(|err| AppError::InvalidFeatureFile {
         path: path.to_path_buf(),
@@ -711,7 +707,7 @@ fn decrypt_encrypted_store(
 }
 
 #[derive(Serialize, Deserialize)]
-struct EncryptedDescriptorStore {
+struct EncryptedEmbeddingStore {
     version: u32,
     algorithm: String,
     nonce: String,
@@ -729,11 +725,11 @@ pub fn user_store_path(store_dir: Option<&Path>, user: &str) -> PathBuf {
     base.join(format!("{user}.json"))
 }
 
-pub fn load_enrolled_descriptors(
+pub fn load_enrolled_embeddings(
     store_dir: Option<&Path>,
     user: &str,
     key: Option<&[u8]>,
-) -> AppResult<Vec<EnrolledDescriptor>> {
+) -> AppResult<Vec<EnrolledEmbedding>> {
     let path = user_store_path(store_dir, user);
     read_enrolled_store(&path, key)
 }
@@ -759,13 +755,13 @@ pub fn validate_user_name(user: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn map_to_descriptor_validation(path: &Path, err: AppError) -> AppError {
+pub fn map_to_embedding_validation(path: &Path, err: AppError) -> AppError {
     match err {
-        AppError::InvalidFeatureFile { message, .. } => AppError::DescriptorValidation {
+        AppError::InvalidFeatureFile { message, .. } => AppError::EmbeddingValidation {
             path: path.to_path_buf(),
             message,
         },
-        AppError::Serialization(source) => AppError::DescriptorValidation {
+        AppError::Serialization(source) => AppError::EmbeddingValidation {
             path: path.to_path_buf(),
             message: source.to_string(),
         },
@@ -773,37 +769,37 @@ pub fn map_to_descriptor_validation(path: &Path, err: AppError) -> AppError {
     }
 }
 
-pub fn ensure_valid_faces(faces: &[FaceDescriptorRecord], path: &Path) -> AppResult<usize> {
+pub fn ensure_valid_faces(faces: &[FaceEmbeddingRecord], path: &Path) -> AppResult<usize> {
     if faces.is_empty() {
         return Err(AppError::InvalidFeatureFile {
             path: path.to_path_buf(),
-            message: "contains no face descriptors".into(),
+            message: "contains no face embeddings".into(),
         });
     }
 
-    let expected_len = faces[0].descriptor.len();
+    let expected_len = faces[0].embedding.len();
     if expected_len == 0 {
         return Err(AppError::InvalidFeatureFile {
             path: path.to_path_buf(),
-            message: "descriptor vectors are empty".into(),
+            message: "embedding vectors are empty".into(),
         });
     }
 
     for (idx, face) in faces.iter().enumerate() {
-        if face.descriptor.len() != expected_len {
+        if face.embedding.len() != expected_len {
             return Err(AppError::InvalidFeatureFile {
                 path: path.to_path_buf(),
                 message: format!(
-                    "descriptor length mismatch at face index {} (expected {}, found {})",
+                    "embedding length mismatch at face index {} (expected {}, found {})",
                     idx,
                     expected_len,
-                    face.descriptor.len()
+                    face.embedding.len()
                 ),
             });
         }
 
         let magnitude = face
-            .descriptor
+            .embedding
             .iter()
             .map(|value| value * value)
             .sum::<f64>()
@@ -811,7 +807,7 @@ pub fn ensure_valid_faces(faces: &[FaceDescriptorRecord], path: &Path) -> AppRes
         if magnitude <= f64::EPSILON {
             return Err(AppError::InvalidFeatureFile {
                 path: path.to_path_buf(),
-                message: format!("face index {idx} has zero-magnitude descriptor"),
+                message: format!("face index {idx} has zero-magnitude embedding"),
             });
         }
     }
@@ -820,15 +816,15 @@ pub fn ensure_valid_faces(faces: &[FaceDescriptorRecord], path: &Path) -> AppRes
 }
 
 pub fn compute_best_similarity(
-    input_faces: &[FaceDescriptorRecord],
-    target_faces: &[FaceDescriptorRecord],
+    input_faces: &[FaceEmbeddingRecord],
+    target_faces: &[FaceEmbeddingRecord],
 ) -> (f64, usize, usize) {
     let mut best_similarity = f64::NEG_INFINITY;
     let mut best_pair = (0, 0);
 
     for (i, input_face) in input_faces.iter().enumerate() {
         for (j, target_face) in target_faces.iter().enumerate() {
-            let similarity = cosine_similarity(&input_face.descriptor, &target_face.descriptor);
+            let similarity = cosine_similarity(&input_face.embedding, &target_face.embedding);
             if similarity > best_similarity {
                 best_similarity = similarity;
                 best_pair = (i, j);
@@ -854,7 +850,7 @@ pub fn cosine_similarity(lhs: &[f64], rhs: &[f64]) -> f64 {
 }
 
 pub trait FaceEmbeddingBackend {
-    fn extract(&self, image: &RgbImage, num_jitters: u32) -> AppResult<Vec<FaceDescriptorRecord>>;
+    fn extract(&self, image: &RgbImage, num_jitters: u32) -> AppResult<Vec<FaceEmbeddingRecord>>;
 }
 
 pub struct DlibBackend {
@@ -888,7 +884,7 @@ impl DlibBackend {
 }
 
 impl FaceEmbeddingBackend for DlibBackend {
-    fn extract(&self, image: &RgbImage, num_jitters: u32) -> AppResult<Vec<FaceDescriptorRecord>> {
+    fn extract(&self, image: &RgbImage, num_jitters: u32) -> AppResult<Vec<FaceEmbeddingRecord>> {
         let matrix = ImageMatrix::from_image(image);
         let locations = self.detector.face_locations(&matrix);
 
@@ -903,16 +899,16 @@ impl FaceEmbeddingBackend for DlibBackend {
 
         let mut records = Vec::with_capacity(locations.len());
         for (rect, encoding) in locations.iter().zip(encodings.iter()) {
-            let descriptor = encoding.as_ref().to_vec();
+            let embedding = encoding.as_ref().to_vec();
             let bounding_box = BoundingBox {
                 left: rect.left,
                 top: rect.top,
                 right: rect.right,
                 bottom: rect.bottom,
             };
-            records.push(FaceDescriptorRecord {
+            records.push(FaceEmbeddingRecord {
                 bounding_box,
-                descriptor,
+                embedding,
             });
         }
 
@@ -940,7 +936,7 @@ mod tests {
     }
 
     struct StubBackend {
-        faces: Vec<FaceDescriptorRecord>,
+        faces: Vec<FaceEmbeddingRecord>,
     }
 
     impl FaceEmbeddingBackend for StubBackend {
@@ -948,7 +944,7 @@ mod tests {
             &self,
             _image: &RgbImage,
             _num_jitters: u32,
-        ) -> AppResult<Vec<FaceDescriptorRecord>> {
+        ) -> AppResult<Vec<FaceEmbeddingRecord>> {
             Ok(self.faces.clone())
         }
     }
@@ -965,18 +961,18 @@ mod tests {
         serde_json::to_writer_pretty(file, summary).unwrap();
     }
 
-    fn summary_with_descriptors(label: &str, descriptors: Vec<Vec<f64>>) -> FaceExtractionSummary {
-        let faces = descriptors
+    fn summary_with_embeddings(label: &str, embeddings: Vec<Vec<f64>>) -> FaceExtractionSummary {
+        let faces = embeddings
             .into_iter()
             .enumerate()
-            .map(|(idx, descriptor)| FaceDescriptorRecord {
+            .map(|(idx, embedding)| FaceEmbeddingRecord {
                 bounding_box: BoundingBox {
                     left: idx as i64,
                     top: 0,
                     right: 1,
                     bottom: 1,
                 },
-                descriptor,
+                embedding,
             })
             .collect::<Vec<_>>();
 
@@ -1014,13 +1010,13 @@ mod tests {
         }
     }
 
-    impl DescriptorKeyBackend for StubKeyBackend {
-        fn fetch(&self, _user: &str) -> AppResult<DescriptorKeyStatus> {
+    impl EmbeddingKeyBackend for StubKeyBackend {
+        fn fetch(&self, _user: &str) -> AppResult<EmbeddingKeyStatus> {
             Ok(match self.stored.borrow().clone() {
-                Some(bytes) => DescriptorKeyStatus::Present(
-                    DescriptorKey::from_bytes(bytes).expect("valid stub key"),
+                Some(bytes) => EmbeddingKeyStatus::Present(
+                    EmbeddingKey::from_bytes(bytes).expect("valid stub key"),
                 ),
-                None => DescriptorKeyStatus::Missing,
+                None => EmbeddingKeyStatus::Missing,
             })
         }
 
@@ -1029,18 +1025,18 @@ mod tests {
             Ok(())
         }
 
-        fn generate(&self) -> DescriptorKey {
+        fn generate(&self) -> EmbeddingKey {
             let bytes = self
                 .queued
                 .borrow_mut()
                 .pop_front()
                 .expect("stub key backend missing queued key");
-            DescriptorKey::from_bytes(bytes).expect("valid stub key")
+            EmbeddingKey::from_bytes(bytes).expect("valid stub key")
         }
     }
 
     #[test]
-    fn persists_descriptors_to_requested_output() {
+    fn persists_embeddings_to_requested_output() {
         let tmp = TempDir::new().unwrap();
         let output_path = tmp.path().join("out.json");
         let image_path = tmp.path().join("input.png");
@@ -1056,25 +1052,25 @@ mod tests {
             jitters: 1,
         };
 
-        let descriptor = FaceDescriptorRecord {
+        let embedding = FaceEmbeddingRecord {
             bounding_box: BoundingBox {
                 left: 1,
                 top: 2,
                 right: 3,
                 bottom: 4,
             },
-            descriptor: vec![0.1, 0.2, 0.3],
+            embedding: vec![0.1, 0.2, 0.3],
         };
 
         let backend = StubBackend {
-            faces: vec![descriptor.clone()],
+            faces: vec![embedding.clone()],
         };
 
         let models = stub_models();
 
         let outcome = run_face_extraction_with_backend(&config, &models, &backend).unwrap();
         assert_eq!(outcome.summary.num_faces, 1);
-        assert_eq!(outcome.summary.faces, vec![descriptor.clone()]);
+        assert_eq!(outcome.summary.faces, vec![embedding.clone()]);
         assert!(output_path.exists());
 
         let written = std::fs::read_to_string(output_path).unwrap();
@@ -1113,13 +1109,13 @@ mod tests {
         let target_a = tmp.path().join("target-a.json");
         let target_b = tmp.path().join("target-b.json");
 
-        let input_summary = summary_with_descriptors("input", vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
+        let input_summary = summary_with_embeddings("input", vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
         write_summary(&input_path, &input_summary);
 
-        let target_summary_a = summary_with_descriptors("a", vec![vec![1.0, 0.0]]);
+        let target_summary_a = summary_with_embeddings("a", vec![vec![1.0, 0.0]]);
         write_summary(&target_a, &target_summary_a);
 
-        let target_summary_b = summary_with_descriptors("b", vec![vec![-1.0, 0.0]]);
+        let target_summary_b = summary_with_embeddings("b", vec![vec![-1.0, 0.0]]);
         write_summary(&target_b, &target_summary_b);
 
         let config = FaceComparisonConfig {
@@ -1141,7 +1137,7 @@ mod tests {
         let input_path = tmp.path().join("input.json");
         let missing_target = tmp.path().join("missing.json");
 
-        let input_summary = summary_with_descriptors("input", vec![vec![1.0, 0.0]]);
+        let input_summary = summary_with_embeddings("input", vec![vec![1.0, 0.0]]);
         write_summary(&input_path, &input_summary);
 
         let config = FaceComparisonConfig {
@@ -1162,13 +1158,13 @@ mod tests {
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
 
-        let descriptor_path = tmp.path().join("faces.json");
+        let embedding_path = tmp.path().join("faces.json");
         let summary =
-            summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
-        write_summary(&descriptor_path, &summary);
+            summary_with_embeddings("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
+        write_summary(&embedding_path, &summary);
         let config = FaceEnrollmentConfig {
             user: "alice".into(),
-            descriptor: descriptor_path.clone(),
+            embedding: embedding_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
@@ -1180,7 +1176,7 @@ mod tests {
         let key = backend.current_key().unwrap();
         let records = read_enrolled_store(&store_path, Some(key.as_slice())).unwrap();
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].descriptor.len(), 3);
+        assert_eq!(records[0].embedding.len(), 3);
     }
 
     #[test]
@@ -1189,13 +1185,13 @@ mod tests {
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
 
-        let descriptor_path = tmp.path().join("faces.json");
-        let summary = summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5]]);
-        write_summary(&descriptor_path, &summary);
+        let embedding_path = tmp.path().join("faces.json");
+        let summary = summary_with_embeddings("input", vec![vec![1.0, 0.0, 0.5]]);
+        write_summary(&embedding_path, &summary);
 
         let config = FaceEnrollmentConfig {
             user: "alice/bad".into(),
-            descriptor: descriptor_path.clone(),
+            embedding: embedding_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
@@ -1207,42 +1203,42 @@ mod tests {
     }
 
     #[test]
-    fn enroll_rejects_empty_descriptor_payload() {
+    fn enroll_rejects_empty_embedding_payload() {
         let tmp = TempDir::new().unwrap();
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
 
-        let descriptor_path = tmp.path().join("faces.json");
-        let summary = summary_with_descriptors("input", vec![]);
-        write_summary(&descriptor_path, &summary);
+        let embedding_path = tmp.path().join("faces.json");
+        let summary = summary_with_embeddings("input", vec![]);
+        write_summary(&embedding_path, &summary);
 
         let config = FaceEnrollmentConfig {
             user: "alice".into(),
-            descriptor: descriptor_path.clone(),
+            embedding: embedding_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
         let err = run_face_enrollment_with_backend(&config, &backend).unwrap_err();
         match err {
-            AppError::DescriptorValidation { .. } => {}
+            AppError::EmbeddingValidation { .. } => {}
             other => panic!("unexpected error: {:?}", other),
         }
     }
 
     #[test]
-    fn remove_descriptor_by_id_updates_store() {
+    fn remove_embedding_by_id_updates_store() {
         let tmp = TempDir::new().unwrap();
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
 
-        let descriptor_path = tmp.path().join("faces.json");
+        let embedding_path = tmp.path().join("faces.json");
         let summary =
-            summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
-        write_summary(&descriptor_path, &summary);
+            summary_with_embeddings("input", vec![vec![1.0, 0.0, 0.5], vec![0.1, 0.2, 0.3]]);
+        write_summary(&embedding_path, &summary);
 
         let enroll_config = FaceEnrollmentConfig {
             user: "alice".into(),
-            descriptor: descriptor_path.clone(),
+            embedding: embedding_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
@@ -1252,7 +1248,7 @@ mod tests {
 
         let remove_config = FaceRemovalConfig {
             user: "alice".into(),
-            descriptor_ids: vec![target_id.clone()],
+            embedding_ids: vec![target_id.clone()],
             remove_all: false,
             store_dir: Some(store_dir.clone()),
         };
@@ -1267,20 +1263,20 @@ mod tests {
     }
 
     #[test]
-    fn remove_unknown_descriptor_returns_error() {
+    fn remove_unknown_embedding_returns_error() {
         let tmp = TempDir::new().unwrap();
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
         let remove_config = FaceRemovalConfig {
             user: "alice".into(),
-            descriptor_ids: vec!["missing".into()],
+            embedding_ids: vec!["missing".into()],
             remove_all: false,
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
         let err = run_face_removal_with_backend(&remove_config, &backend).unwrap_err();
         match err {
-            AppError::DescriptorNotFound { .. } => {}
+            AppError::EmbeddingNotFound { .. } => {}
             other => panic!("unexpected error: {:?}", other),
         }
     }
@@ -1291,13 +1287,13 @@ mod tests {
         let store_dir = tmp.path().join("store");
         std::fs::create_dir_all(&store_dir).unwrap();
 
-        let descriptor_path = tmp.path().join("faces.json");
-        let summary = summary_with_descriptors("input", vec![vec![1.0, 0.0, 0.5]]);
-        write_summary(&descriptor_path, &summary);
+        let embedding_path = tmp.path().join("faces.json");
+        let summary = summary_with_embeddings("input", vec![vec![1.0, 0.0, 0.5]]);
+        write_summary(&embedding_path, &summary);
 
         let enroll_config = FaceEnrollmentConfig {
             user: "alice".into(),
-            descriptor: descriptor_path.clone(),
+            embedding: embedding_path.clone(),
             store_dir: Some(store_dir.clone()),
         };
         let backend = StubKeyBackend::new();
@@ -1306,7 +1302,7 @@ mod tests {
 
         let remove_config = FaceRemovalConfig {
             user: "alice".into(),
-            descriptor_ids: vec![],
+            embedding_ids: vec![],
             remove_all: true,
             store_dir: Some(store_dir.clone()),
         };

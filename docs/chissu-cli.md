@@ -80,14 +80,14 @@ On failures the command prints a descriptive message to `stderr`. With `--json`,
 
 ## Face feature extraction
 
-Supply a PNG that contains one or more faces and the command will produce descriptor vectors suitable for downstream face recognition. The dlib models can be provided via CLI flags or environment variables.
+Supply a PNG that contains one or more faces and the command will produce embedding vectors suitable for downstream face recognition. The dlib models can be provided via CLI flags or environment variables.
 
 Download the official models from https://dlib.net/files/ and keep track of their locations:
 
 - `shape_predictor_68_face_landmarks.dat`
 - `dlib_face_recognition_resnet_model_v1.dat`
 
-Run the extractor and direct the descriptors to a file:
+Run the extractor and direct the embeddings to a file:
 
 ```bash
 export DLIB_LANDMARK_MODEL=$HOME/models/shape_predictor_68_face_landmarks.dat
@@ -105,7 +105,7 @@ chissu-cli faces extract captures/sample.png \
   --jitters 2
 ```
 
-Human-readable output lists the detected faces, descriptor length, and the saved feature file. Structured runs honour the global `--json` switch and emit a payload similar to:
+Human-readable output lists the detected faces, embedding length, and the saved feature file. Structured runs honour the global `--json` switch and emit a payload similar to:
 
 ```json
 {
@@ -116,7 +116,7 @@ Human-readable output lists the detected faces, descriptor length, and the saved
   "faces": [
     {
       "bounding_box": { "left": 120, "top": 80, "right": 320, "bottom": 360 },
-      "descriptor": [0.0123, 0.1042, 0.0831, 0.0987]
+      "embedding": [0.0123, 0.1042, 0.0831, 0.0987]
     }
   ],
   "landmark_model": "/home/user/models/shape_predictor_68_face_landmarks.dat",
@@ -131,7 +131,7 @@ If you encounter build failures referencing `dlib/dnn.h`, install the system dev
 
 ## Face feature comparison
 
-Re-use previously exported descriptor files to compute similarity scores without re-extracting features. Provide one input file and any number of comparison targets:
+Re-use previously exported embedding files to compute similarity scores without re-extracting features. Provide one input file and any number of comparison targets:
 
 ```bash
 chissu-cli faces compare \
@@ -166,4 +166,4 @@ chissu-cli faces compare --input reference.json --compare-target candidate.json 
 ]
 ```
 
-If any descriptor file is missing, unreadable, or contains no faces, the command aborts, prints an error to `stderr`, and exits with status code `2`.
+If any embedding file is missing, unreadable, or contains no faces, the command aborts, prints an error to `stderr`, and exits with status code `2`.

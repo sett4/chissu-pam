@@ -27,7 +27,7 @@ impl From<&FaceEnrollArgs> for FaceEnrollmentConfig {
     fn from(args: &FaceEnrollArgs) -> Self {
         Self {
             user: args.user.clone(),
-            descriptor: args.descriptor.clone(),
+            embedding: args.embedding.clone(),
             store_dir: args.store_dir.clone(),
         }
     }
@@ -37,7 +37,7 @@ impl From<&FaceRemoveArgs> for FaceRemovalConfig {
     fn from(args: &FaceRemoveArgs) -> Self {
         Self {
             user: args.user.clone(),
-            descriptor_ids: args.descriptor_id.clone(),
+            embedding_ids: args.embedding_id.clone(),
             remove_all: args.all,
             store_dir: args.store_dir.clone(),
         }

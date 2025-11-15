@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use base64::{engine::general_purpose, Engine as _};
 use chissu_face_core::secret_service::{
-    fetch_descriptor_key, DescriptorKeyLookupError, DescriptorKeyStatus, AES_GCM_KEY_BYTES,
+    fetch_embedding_key, EmbeddingKeyLookupError, EmbeddingKeyStatus, AES_GCM_KEY_BYTES,
 };
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
@@ -66,25 +66,25 @@ fn child_entry(user: User, mut stream: UnixStream) -> ! {
     }
 
     let username = user.name.clone();
-    match fetch_descriptor_key(&username) {
-        Ok(DescriptorKeyStatus::Present(key)) => {
+    match fetch_embedding_key(&username) {
+        Ok(EmbeddingKeyStatus::Present(key)) => {
             let encoded = general_purpose::STANDARD.encode(key.as_bytes());
             emit_and_exit(
                 &mut stream,
                 HelperWireMessage::Ok {
-                    aes_gcm_key: encoded,
+                    embedding_key: encoded,
                 },
             );
         }
-        Ok(DescriptorKeyStatus::Missing) => {
+        Ok(EmbeddingKeyStatus::Missing) => {
             emit_and_exit(
                 &mut stream,
                 HelperWireMessage::Missing {
-                    message: "Descriptor key not found in Secret Service.".into(),
+                    message: "Embedding key not found in Secret Service.".into(),
                 },
             );
         }
-        Err(DescriptorKeyLookupError::SecretService(err)) => {
+        Err(EmbeddingKeyLookupError::SecretService(err)) => {
             emit_and_exit(
                 &mut stream,
                 HelperWireMessage::Error {
@@ -93,7 +93,7 @@ fn child_entry(user: User, mut stream: UnixStream) -> ! {
                 },
             );
         }
-        Err(DescriptorKeyLookupError::InvalidFormat { reason, .. }) => {
+        Err(EmbeddingKeyLookupError::InvalidFormat { reason, .. }) => {
             emit_and_exit(
                 &mut stream,
                 HelperWireMessage::Error {
@@ -181,10 +181,10 @@ fn parent_entry(
 
 fn translate_message(msg: HelperWireMessage) -> Result<HelperResponse, HelperError> {
     match msg {
-        HelperWireMessage::Ok { aes_gcm_key } => {
+        HelperWireMessage::Ok { embedding_key } => {
             let decoded = general_purpose::STANDARD
-                .decode(aes_gcm_key.trim())
-                .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(aes_gcm_key.trim()))
+                .decode(embedding_key.trim())
+                .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(embedding_key.trim()))
                 .map_err(|err| {
                     HelperError::IpcFailure(format!("failed to decode helper key: {err}"))
                 })?;
@@ -211,8 +211,8 @@ fn translate_message(msg: HelperWireMessage) -> Result<HelperResponse, HelperErr
 #[serde(tag = "status", rename_all = "lowercase")]
 enum HelperWireMessage {
     Ok {
-        #[serde(rename = "aes_gcm_key")]
-        aes_gcm_key: String,
+        #[serde(rename = "embedding_key", alias = "aes_gcm_key")]
+        embedding_key: String,
     },
     Missing {
         message: String,
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn translate_message_accepts_ok_payload() {
         let payload = HelperWireMessage::Ok {
-            aes_gcm_key: general_purpose::STANDARD.encode([0x11u8; AES_GCM_KEY_BYTES]),
+            embedding_key: general_purpose::STANDARD.encode([0x11u8; AES_GCM_KEY_BYTES]),
         };
         let response = translate_message(payload).unwrap();
         match response {

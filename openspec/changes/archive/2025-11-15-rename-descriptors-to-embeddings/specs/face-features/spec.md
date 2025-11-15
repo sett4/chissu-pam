@@ -1,8 +1,6 @@
-# face-features Specification
+# face-features Specification (Delta: rename-descriptors-to-embeddings)
 
-## Purpose
-TBD - created by archiving change add-face-feature-extraction. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: Face Feature Extraction Command
 The CLI MUST provide a subcommand that loads an existing PNG image, detects faces, and computes embedding vectors (previously called descriptors) using dlib-based models while still accepting legacy terminology on the command line.
 
@@ -41,17 +39,6 @@ The CLI MUST honor the global `--json` flag for the extraction command and surfa
 - **WHEN** the operator runs the command with `--json`
 - **THEN** stdout emits a single JSON object containing detector metadata, face bounding boxes, embedding vectors, and saved file path, using embedding field names (e.g., `embedding_vectors`)
 - **AND** verbose human-oriented logs are suppressed from stdout
-
-### Requirement: Testable Feature Pipeline
-The project MUST include automated tests and documentation that validate embedding extraction without requiring a live camera.
-
-#### Scenario: Fixture-based automated test
-- **WHEN** `cargo test` executes
-- **THEN** at least one test uses a fixture PNG image and a stubbed model to validate embedding generation and persistence logic
-
-#### Scenario: Manual model setup guidance
-- **WHEN** contributors read the documentation
-- **THEN** they find instructions for acquiring the required dlib model weights and running the extraction command against sample images
 
 ### Requirement: Face Feature Comparison Command
 The CLI MUST provide a `faces compare` subcommand that consumes embedding JSON files produced by `faces extract` and reports cosine similarity scores while accepting legacy descriptor inputs.
@@ -116,4 +103,3 @@ The automated enrollment command MUST infer the target user from the invoking Un
 #### Scenario: Non-root override is rejected
 - **WHEN** a non-root user runs `chissu-cli enroll --user bob`
 - **THEN** the command fails validation before any capture occurs, explaining that only root may override the user, and it exits with a non-zero status without touching any store files.
-

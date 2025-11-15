@@ -32,7 +32,7 @@ fn resolve_store_dir_with_sources(
     if cli_value.is_some() {
         return Ok(cli_value);
     }
-    Ok(load_config_from_paths(sources)?.and_then(|file| file.descriptor_store_dir))
+    Ok(load_config_from_paths(sources)?.and_then(|file| file.embedding_store_dir))
 }
 
 pub fn load_capture_defaults() -> AppResult<CaptureDefaults> {
@@ -104,7 +104,7 @@ mod tests {
     fn primary_config_is_used_when_present() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
-        fs::write(&config_path, "descriptor_store_dir = \"/srv/store\"").unwrap();
+        fs::write(&config_path, "embedding_store_dir = \"/srv/store\"").unwrap();
 
         let resolved = resolve_store_dir_with_sources(None, &[config_path.clone()]).unwrap();
         assert_eq!(resolved.unwrap(), PathBuf::from("/srv/store"));
@@ -115,7 +115,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("missing.toml");
         let secondary = dir.path().join("secondary.toml");
-        fs::write(&secondary, "descriptor_store_dir = \"/var/tmp/store\"").unwrap();
+        fs::write(&secondary, "embedding_store_dir = \"/var/tmp/store\"").unwrap();
 
         let resolved =
             resolve_store_dir_with_sources(None, &[missing.clone(), secondary.clone()]).unwrap();
@@ -126,7 +126,7 @@ mod tests {
     fn parse_error_is_reported() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("broken.toml");
-        fs::write(&config_path, "descriptor_store_dir = { not = 'toml' }").unwrap();
+        fs::write(&config_path, "embedding_store_dir = { not = 'toml' }").unwrap();
 
         let err = resolve_store_dir_with_sources(None, &[config_path.clone()]).unwrap_err();
         match err {

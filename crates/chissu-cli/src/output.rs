@@ -78,7 +78,7 @@ pub fn render_face_enroll(outcome: &FaceEnrollmentOutcome, mode: OutputMode) -> 
                 println!("{line}");
             }
             println!(
-                "Enrollment successful: {} descriptor(s) added to {}",
+                "Enrollment successful: {} embedding(s) added to {}",
                 outcome.added.len(),
                 outcome.store_path.display()
             );
@@ -111,7 +111,7 @@ pub fn render_auto_enroll(
                 }
             }
             println!(
-                "Auto enrollment successful: {} descriptor(s) added for user {}",
+                "Auto enrollment successful: {} embedding(s) added for user {}",
                 outcome.enrollment.added.len(),
                 outcome.enrollment.user
             );
@@ -126,10 +126,10 @@ pub fn render_auto_enroll(
                         outcome.capture_path.display()
                     );
                 }
-                if outcome.descriptor_deleted {
+                if outcome.embedding_deleted {
                     tracing::info!(
-                        "Descriptor payload {} deleted after enrollment",
-                        outcome.descriptor_path.display()
+                        "Embedding payload {} deleted after enrollment",
+                        outcome.embedding_path.display()
                     );
                 }
             }
@@ -147,7 +147,7 @@ pub fn render_auto_enroll(
 }
 
 fn auto_enroll_json_payload(outcome: &AutoEnrollOutcome) -> Value {
-    let descriptor_ids: Vec<String> = outcome
+    let embedding_ids: Vec<String> = outcome
         .enrollment
         .added
         .iter()
@@ -158,10 +158,10 @@ fn auto_enroll_json_payload(outcome: &AutoEnrollOutcome) -> Value {
         "target_user": outcome.target_user,
         "store_path": outcome.enrollment.store_path.display().to_string(),
         "added": outcome.enrollment.added,
-        "descriptor_ids": descriptor_ids,
+        "embedding_ids": embedding_ids,
         "captured_image": outcome.capture_path.display().to_string(),
         "captured_image_deleted": outcome.capture_deleted,
-        "descriptor_file_deleted": outcome.descriptor_deleted,
+        "embedding_file_deleted": outcome.embedding_deleted,
         "faces_detected": outcome.faces_detected,
     })
 }
@@ -180,7 +180,7 @@ mod tests {
             store_path: PathBuf::from("/var/lib/chissu-pam/models/alice.json"),
             added: vec![EnrollmentRecord {
                 id: "abc".into(),
-                descriptor_len: 128,
+                embedding_len: 128,
                 source: "captures/tmp/features.json".into(),
                 created_at: chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             }],
@@ -190,9 +190,9 @@ mod tests {
         let outcome = AutoEnrollOutcome {
             target_user: "alice".into(),
             capture_path: PathBuf::from("captures/auto-enroll/capture.png"),
-            descriptor_path: PathBuf::from("captures/auto-enroll/features.json"),
+            embedding_path: PathBuf::from("captures/auto-enroll/features.json"),
             capture_deleted: true,
-            descriptor_deleted: true,
+            embedding_deleted: true,
             faces_detected: 1,
             enrollment,
             logs: vec![],
@@ -204,9 +204,9 @@ mod tests {
             "captures/auto-enroll/capture.png"
         );
         assert_eq!(payload["target_user"], "alice");
-        assert_eq!(payload["descriptor_ids"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["embedding_ids"].as_array().unwrap().len(), 1);
         assert_eq!(payload["captured_image_deleted"], true);
-        assert_eq!(payload["descriptor_file_deleted"], true);
+        assert_eq!(payload["embedding_file_deleted"], true);
         assert_eq!(payload["faces_detected"], 1);
     }
 }
@@ -218,7 +218,7 @@ pub fn render_face_remove(outcome: &FaceRemovalOutcome, mode: OutputMode) -> App
                 println!("{line}");
             }
             println!(
-                "Removal successful: removed {} descriptor(s); remaining {}",
+                "Removal successful: removed {} embedding(s); remaining {}",
                 outcome.removed_ids.len(),
                 outcome.remaining
             );

@@ -15,9 +15,9 @@ use crate::faces::{self, FaceEnrollmentConfig, FaceEnrollmentOutcome, FaceExtrac
 pub struct AutoEnrollOutcome {
     pub target_user: String,
     pub capture_path: PathBuf,
-    pub descriptor_path: PathBuf,
+    pub embedding_path: PathBuf,
     pub capture_deleted: bool,
-    pub descriptor_deleted: bool,
+    pub embedding_deleted: bool,
     pub faces_detected: usize,
     pub enrollment: FaceEnrollmentOutcome,
     pub logs: Vec<String>,
@@ -73,7 +73,7 @@ where
     Fe: Fn(&FaceExtractionConfig) -> AppResult<faces::FaceExtractionOutcome>,
     Fm: Fn(&FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome>,
 {
-    let (capture_path, descriptor_path) = build_temp_paths(&ctx.temp_base)?;
+    let (capture_path, embedding_path) = build_temp_paths(&ctx.temp_base)?;
 
     let capture_args = CaptureArgs {
         device: ctx.device_override.clone(),
@@ -111,7 +111,7 @@ where
         image: capture_path.clone(),
         landmark_model: ctx.landmark_model.clone(),
         encoder_model: ctx.encoder_model.clone(),
-        output: Some(descriptor_path.clone()),
+        output: Some(embedding_path.clone()),
         jitters: ctx.jitters,
     };
     let extraction_config = FaceExtractionConfig::from(&extract_args);
@@ -119,15 +119,15 @@ where
     logs.extend(extraction_outcome.logs.clone());
 
     if extraction_outcome.summary.num_faces == 0 {
-        return Err(AppError::DescriptorValidation {
-            path: descriptor_path.clone(),
+        return Err(AppError::EmbeddingValidation {
+            path: embedding_path.clone(),
             message: "no faces detected in captured frame".into(),
         });
     }
 
     let enroll_args = FaceEnrollArgs {
         user: ctx.target_user.clone(),
-        descriptor: descriptor_path.clone(),
+        embedding: embedding_path.clone(),
         store_dir: ctx.store_dir.clone(),
     };
     let enrollment_config = FaceEnrollmentConfig::from(&enroll_args);
@@ -135,15 +135,15 @@ where
     logs.extend(enrollment_outcome.logs.clone());
 
     let capture_deleted = cleanup_file(&capture_path, &mut logs, "captured frame");
-    let descriptor_deleted = cleanup_file(&descriptor_path, &mut logs, "descriptor payload");
+    let embedding_deleted = cleanup_file(&embedding_path, &mut logs, "embedding payload");
     cleanup_dir(&ctx.temp_base, &mut logs);
 
     Ok(AutoEnrollOutcome {
         target_user: ctx.target_user,
         capture_path,
-        descriptor_path,
+        embedding_path,
         capture_deleted,
-        descriptor_deleted,
+        embedding_deleted,
         faces_detected: extraction_outcome.summary.num_faces,
         enrollment: enrollment_outcome,
         logs,
@@ -154,8 +154,8 @@ fn build_temp_paths(base: &Path) -> AppResult<(PathBuf, PathBuf)> {
     fs::create_dir_all(base)?;
     let timestamp = Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
     let capture_path = base.join(format!("capture-{timestamp}.png"));
-    let descriptor_path = base.join(format!("features-{timestamp}.json"));
-    Ok((capture_path, descriptor_path))
+    let embedding_path = base.join(format!("features-{timestamp}.json"));
+    Ok((capture_path, embedding_path))
 }
 
 fn cleanup_file(path: &Path, logs: &mut Vec<String>, label: &str) -> bool {
@@ -273,14 +273,14 @@ mod tests {
     fn stub_extraction_outcome(image: &Path, output: &Path, faces: usize) -> FaceExtractionOutcome {
         let mut face_records = Vec::new();
         for _ in 0..faces {
-            face_records.push(crate::faces::FaceDescriptorRecord {
+            face_records.push(crate::faces::FaceEmbeddingRecord {
                 bounding_box: crate::faces::BoundingBox {
                     left: 0,
                     top: 0,
                     right: 10,
                     bottom: 10,
                 },
-                descriptor: vec![0.0, 1.0],
+                embedding: vec![0.0, 1.0],
             });
         }
         FaceExtractionOutcome {
@@ -304,7 +304,7 @@ mod tests {
             store_path: store_path.to_path_buf(),
             added: vec![EnrollmentRecord {
                 id: "abc".into(),
-                descriptor_len: 2,
+                embedding_len: 2,
                 source: "stub".into(),
                 created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             }],
@@ -379,7 +379,7 @@ mod tests {
         let outcome = run_auto_enroll_with(ctx, capture_runner, extractor, enroller).unwrap();
         assert!(capture_called.into_inner());
         assert!(outcome.capture_deleted);
-        assert!(outcome.descriptor_deleted);
+        assert!(outcome.embedding_deleted);
         assert_eq!(outcome.faces_detected, 1);
         assert!(outcome
             .logs
@@ -444,7 +444,7 @@ mod tests {
         };
 
         let err = run_auto_enroll_with(ctx, capture_runner, extractor, |_cfg| unreachable!());
-        assert!(matches!(err, Err(AppError::DescriptorValidation { .. })));
+        assert!(matches!(err, Err(AppError::EmbeddingValidation { .. })));
     }
 
     #[test]

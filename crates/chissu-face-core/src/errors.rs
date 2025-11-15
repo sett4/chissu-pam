@@ -69,17 +69,17 @@ pub enum AppError {
         source: io::Error,
     },
 
-    #[error("descriptor file {path} is invalid: {message}")]
+    #[error("embedding file {path} is invalid: {message}")]
     InvalidFeatureFile { path: PathBuf, message: String },
 
-    #[error("descriptor payload in {path} failed validation: {message}")]
-    DescriptorValidation { path: PathBuf, message: String },
+    #[error("embedding payload in {path} failed validation: {message}")]
+    EmbeddingValidation { path: PathBuf, message: String },
 
     #[error("invalid user name '{user}': {message}")]
     InvalidUser { user: String, message: String },
 
-    #[error("no descriptor with id {descriptor_id} found for user {user}")]
-    DescriptorNotFound { user: String, descriptor_id: String },
+    #[error("no embedding with id {embedding_id} found for user {user}")]
+    EmbeddingNotFound { user: String, embedding_id: String },
 
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
@@ -101,13 +101,13 @@ pub enum AppError {
         message: String,
     },
 
-    #[error("descriptor store {path} is encrypted and requires a Secret Service key")]
+    #[error("embedding store {path} is encrypted and requires a Secret Service key")]
     EncryptedStoreRequiresKey { path: PathBuf },
 
-    #[error("descriptor encryption error: {0}")]
+    #[error("embedding encryption error: {0}")]
     Encryption(String),
 
-    #[error("Secret Service descriptor key for user {user} invalid: {message}")]
+    #[error("Secret Service embedding key for user {user} invalid: {message}")]
     SecretServiceKeyInvalid { user: String, message: String },
 }
 
@@ -124,9 +124,9 @@ impl AppError {
             AppError::ModelLoad { .. } => ExitCode::from(2),
             AppError::FeatureRead { .. } => ExitCode::from(2),
             AppError::InvalidFeatureFile { .. } => ExitCode::from(2),
-            AppError::DescriptorValidation { .. } => ExitCode::from(3),
+            AppError::EmbeddingValidation { .. } => ExitCode::from(3),
             AppError::InvalidUser { .. } => ExitCode::from(2),
-            AppError::DescriptorNotFound { .. } => ExitCode::from(4),
+            AppError::EmbeddingNotFound { .. } => ExitCode::from(4),
             AppError::ConfigRead { .. } => ExitCode::from(2),
             AppError::ConfigParse { .. } => ExitCode::from(2),
             AppError::SecretServiceUnavailable { .. } => ExitCode::from(2),
@@ -154,13 +154,13 @@ impl From<SecretServiceError> for AppError {
     }
 }
 
-impl From<crate::secret_service::DescriptorKeyLookupError> for AppError {
-    fn from(err: crate::secret_service::DescriptorKeyLookupError) -> Self {
+impl From<crate::secret_service::EmbeddingKeyLookupError> for AppError {
+    fn from(err: crate::secret_service::EmbeddingKeyLookupError) -> Self {
         match err {
-            crate::secret_service::DescriptorKeyLookupError::SecretService(inner) => {
+            crate::secret_service::EmbeddingKeyLookupError::SecretService(inner) => {
                 AppError::from(inner)
             }
-            crate::secret_service::DescriptorKeyLookupError::InvalidFormat { user, reason } => {
+            crate::secret_service::EmbeddingKeyLookupError::InvalidFormat { user, reason } => {
                 AppError::SecretServiceKeyInvalid {
                     user,
                     message: reason,

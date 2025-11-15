@@ -2,7 +2,7 @@
 
 ## Overview
 
-chissu-pam is an open-source, face-recognition-driven Pluggable Authentication Module (PAM) that pairs a Rust CLI with shared libraries to enroll and verify users via infrared-friendly V4L2 webcams. The workspace explores a reproducible workflow that captures frames, derives reusable feature vectors, and wires those descriptors into PAM conversations for experimental login flows.
+chissu-pam is an open-source, face-recognition-driven Pluggable Authentication Module (PAM) that pairs a Rust CLI with shared libraries to enroll and verify users via infrared-friendly V4L2 webcams. The workspace explores a reproducible workflow that captures frames, derives reusable face embeddings, and wires those embeddings into PAM conversations for experimental login flows.
 
 This repository is in an early, exploratory phase: interfaces move quickly, persistence formats may break, and the security surface has not been formally audited. Treat every component as pre-production, review the code before deploying to sensitive systems, and expect rough edges as the project evolves.
 
@@ -22,8 +22,8 @@ This repository is in an early, exploratory phase: interfaces move quickly, pers
 
 ## Why This Project
 
-- **Secret Service–backed encryption.** Descriptor stores are wrapped with AES-GCM keys managed by the GNOME Secret Service (`chissu-cli keyring ...`). Even if `/var/lib/chissu-pam/models/*.json` leaks, the ciphertext is unreadable until the legitimate user session unlocks the keyring.
-- **Root privileges only for system wiring.** Daily capture, enrollment, and descriptor maintenance all run unprivileged inside the user’s desktop session so Secret Service is reachable. Elevated access is required only for installing binaries, copying `/etc/chissu-pam/config.toml`, or editing `/etc/pam.d/<service>`.
+- **Secret Service–backed encryption.** Embedding stores are wrapped with AES-GCM keys managed by the GNOME Secret Service (`chissu-cli keyring ...`). Even if `/var/lib/chissu-pam/models/*.json` leaks, the ciphertext is unreadable until the legitimate user session unlocks the keyring.
+- **Root privileges only for system wiring.** Daily capture, enrollment, and embedding store maintenance all run unprivileged inside the user’s desktop session so Secret Service is reachable. Elevated access is required only for installing binaries, copying `/etc/chissu-pam/config.toml`, or editing `/etc/pam.d/<service>`.
 
 ## Getting Started
 
@@ -83,7 +83,7 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
    sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
    ```
 
-5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `descriptor_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
+5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `embedding_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
 
 6. **Store dlib weights** under a readable directory (for example `/var/lib/chissu-pam/dllib-models`) and update the config or environment variables so both CLI and PAM know where to load them.
 
@@ -142,17 +142,17 @@ cargo build
 
 ### Enroll with live capture (`chissu-cli enroll`)
 
-Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes descriptors, encrypts them via Secret Service–managed AES-GCM keys, and deletes the temporary capture + descriptor files once enrollment succeeds.
+Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes embeddings, encrypts them via Secret Service–managed AES-GCM keys, and deletes the temporary capture + embedding files once enrollment succeeds.
 
 ```bash
 chissu-cli enroll
 ```
 
-- Target user defaults to the invoking account and does **not** require `sudo`. Because Secret Service runs in your desktop session, the CLI can request the descriptor key, encrypt the updated store, and return status without elevated privileges.
+- Target user defaults to the invoking account and does **not** require `sudo`. Because Secret Service runs in your desktop session, the CLI can request the embedding key, encrypt the updated store, and return status without elevated privileges.
 - Use `--device /dev/video2` when you need to override the configured device, `--store-dir <path>` to bypass the config file, and `--jitters`, `--landmark-model`, `--encoder-model` to fine-tune extraction just like `faces extract`.
 - Model paths (`landmark_model`, `encoder_model`) inherit from `/etc/chissu-pam/config.toml` when present, fall back to `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`, and only then require explicit CLI flags.
 
-Need to enroll another user’s descriptors? Elevate just for that command so you can reach their Secret Service session and descriptor store:
+Need to enroll another user’s embeddings? Elevate just for that command so you can reach their Secret Service session and embedding store:
 
 ```bash
 sudo \
@@ -163,7 +163,7 @@ sudo \
 
 ### PAM facial authentication
 
-The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Linux users by comparing a live camera capture with descriptors enrolled via `faces enroll`.
+The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Linux users by comparing a live camera capture with embeddings enrolled via `faces enroll`.
 
 - Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
 - Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so`) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
@@ -172,15 +172,15 @@ The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Li
   - `capture_timeout_secs = 5`
   - `frame_interval_millis = 500`
   - `video_device = "/dev/video0"`
-  - `descriptor_store_dir = "/var/lib/chissu-pam/models"`
+  - `embedding_store_dir = "/var/lib/chissu-pam/models"`
   - `pixel_format = "Y16"`
   - `warmup_frames = 0`
   - `jitters = 1`
   - `require_secret_service = false`
 - Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissu` or `journalctl SYSLOG_IDENTIFIER=pam_chissu`.
-- Interactive PAM conversations mirror those events on the terminal: successful matches trigger a `PAM_TEXT_INFO` banner, while retries and failures emit `PAM_ERROR_MSG` guidance ("stay in frame", "no descriptors", etc.) so operators see immediate feedback even without tailing syslog.
-- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM descriptor key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no descriptors" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable so downstream modules can continue handling the login.
-- Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the helper inside PAM; it defaults to `false` so you can opt in once the desktop session exposes Secret Service. Store a 32-byte AES-GCM descriptor key (Base64-encoded) under `service=chissu-pam` and `user=<pam user>` so the helper can unlock descriptor files during authentication.
+- Interactive PAM conversations mirror those events on the terminal: successful matches trigger a `PAM_TEXT_INFO` banner, while retries and failures emit `PAM_ERROR_MSG` guidance ("stay in frame", "no embeddings", etc.) so operators see immediate feedback even without tailing syslog.
+- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM embedding key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no embeddings" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable so downstream modules can continue handling the login.
+- Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the helper inside PAM; it defaults to `false` so you can opt in once the desktop session exposes Secret Service. Store a 32-byte AES-GCM embedding key (Base64-encoded) under `service=chissu-pam` and `user=<pam user>` so the helper can unlock embedding files during authentication.
 - The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
 
 See [`docs/pam-auth.md`](docs/pam-auth.md) for installation walkthroughs, configuration examples, and troubleshooting tips.
@@ -200,14 +200,14 @@ The first file that exists wins for each key; CLI flags or environment variables
 | `video_device`                                   | Default V4L2 path (`/dev/video0` fallback).                                                |
 | `pixel_format`                                   | Negotiated capture pixel format (`Y16` fallback).                                          |
 | `warmup_frames`                                  | Number of frames to discard before saving.                                                 |
-| `descriptor_store_dir`                           | Directory for encrypted descriptor files (`/var/lib/chissu-pam/models`).                   |
+| `embedding_store_dir`                           | Directory for encrypted embedding files (`/var/lib/chissu-pam/models`).                   |
 | `landmark_model` / `encoder_model`               | Paths to the dlib weights (overrideable via `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`). |
 | `similarity_threshold`                           | PAM acceptance threshold (default `0.7`).                                                  |
 | `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |
-| `jitters`                                        | Number of random jitters applied when encoding descriptors.                                |
+| `jitters`                                        | Number of random jitters applied when encoding embeddings.                                 |
 | `require_secret_service`                         | Fail fast when the Secret Service helper cannot obtain a key.                              |
 
-For CLI operations, `chissu-config` also honours `CHISSU_PAM_STORE_DIR` for descriptor storage overrides plus any immediate CLI flags. After editing the TOML file, re-run `chissu-cli keyring check` and a quick `chissu-cli capture --json` to verify the new settings.
+For CLI operations, `chissu-config` also honours `CHISSU_PAM_STORE_DIR` for embedding storage overrides plus any immediate CLI flags. After editing the TOML file, re-run `chissu-cli keyring check` and a quick `chissu-cli capture --json` to verify the new settings.
 
 ## Testing
 

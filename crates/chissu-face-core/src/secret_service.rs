@@ -45,30 +45,30 @@ pub trait SecretServiceProbe {
 }
 
 #[derive(Debug, Clone)]
-pub enum DescriptorKeyStatus {
-    Present(DescriptorKey),
+pub enum EmbeddingKeyStatus {
+    Present(EmbeddingKey),
     Missing,
 }
 
 #[derive(Debug, Clone)]
-pub struct DescriptorKey {
+pub struct EmbeddingKey {
     bytes: Vec<u8>,
 }
 
-impl DescriptorKey {
+impl EmbeddingKey {
     pub fn generate() -> Self {
         let mut bytes = vec![0u8; AES_GCM_KEY_BYTES];
         OsRng.fill_bytes(&mut bytes);
         Self { bytes }
     }
 
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, DescriptorKeyLookupError> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, EmbeddingKeyLookupError> {
         Self::from_user_bytes("unknown", bytes)
     }
 
-    pub fn from_user_bytes(user: &str, bytes: Vec<u8>) -> Result<Self, DescriptorKeyLookupError> {
+    pub fn from_user_bytes(user: &str, bytes: Vec<u8>) -> Result<Self, EmbeddingKeyLookupError> {
         if bytes.len() != AES_GCM_KEY_BYTES {
-            return Err(DescriptorKeyLookupError::InvalidFormat {
+            return Err(EmbeddingKeyLookupError::InvalidFormat {
                 user: user.to_string(),
                 reason: format!(
                     "expected {AES_GCM_KEY_BYTES} bytes but found {}",
@@ -89,7 +89,7 @@ impl DescriptorKey {
 }
 
 #[derive(Debug, Error, Clone)]
-pub enum DescriptorKeyLookupError {
+pub enum EmbeddingKeyLookupError {
     #[error(transparent)]
     SecretService(#[from] SecretServiceError),
     #[error("Secret Service entry for user '{user}' stored invalid AES-GCM key: {reason}")]
@@ -126,7 +126,7 @@ pub fn ensure_secret_service_available<P: SecretServiceProbe>(
     probe.check(user)
 }
 
-pub fn fetch_descriptor_key(user: &str) -> Result<DescriptorKeyStatus, DescriptorKeyLookupError> {
+pub fn fetch_embedding_key(user: &str) -> Result<EmbeddingKeyStatus, EmbeddingKeyLookupError> {
     let entry = Entry::new(DEFAULT_SERVICE_NAME, user).map_err(|err| {
         SecretServiceError::new(
             user,
@@ -136,15 +136,15 @@ pub fn fetch_descriptor_key(user: &str) -> Result<DescriptorKeyStatus, Descripto
     })?;
 
     match entry.get_password() {
-        Ok(secret) => decode_descriptor_key(user, &secret).map(DescriptorKeyStatus::Present),
-        Err(KeyringError::NoEntry) => Ok(DescriptorKeyStatus::Missing),
-        Err(err) => Err(DescriptorKeyLookupError::SecretService(
+        Ok(secret) => decode_embedding_key(user, &secret).map(EmbeddingKeyStatus::Present),
+        Err(KeyringError::NoEntry) => Ok(EmbeddingKeyStatus::Missing),
+        Err(err) => Err(EmbeddingKeyLookupError::SecretService(
             SecretServiceError::new(user, DEFAULT_SERVICE_NAME, describe_keyring_error(&err)),
         )),
     }
 }
 
-pub fn store_descriptor_key(user: &str, key: &[u8]) -> Result<(), SecretServiceError> {
+pub fn store_embedding_key(user: &str, key: &[u8]) -> Result<(), SecretServiceError> {
     let entry = Entry::new(DEFAULT_SERVICE_NAME, user).map_err(|err| {
         SecretServiceError::new(
             user,
@@ -160,8 +160,8 @@ pub fn store_descriptor_key(user: &str, key: &[u8]) -> Result<(), SecretServiceE
         })
 }
 
-pub fn generate_descriptor_key() -> DescriptorKey {
-    DescriptorKey::generate()
+pub fn generate_embedding_key() -> EmbeddingKey {
+    EmbeddingKey::generate()
 }
 
 pub fn default_service_name() -> &'static str {
@@ -194,13 +194,10 @@ fn describe_keyring_error(err: &KeyringError) -> String {
     }
 }
 
-fn decode_descriptor_key(
-    user: &str,
-    secret: &str,
-) -> Result<DescriptorKey, DescriptorKeyLookupError> {
+fn decode_embedding_key(user: &str, secret: &str) -> Result<EmbeddingKey, EmbeddingKeyLookupError> {
     let trimmed = secret.trim();
     if trimmed.is_empty() {
-        return Err(DescriptorKeyLookupError::InvalidFormat {
+        return Err(EmbeddingKeyLookupError::InvalidFormat {
             user: user.to_string(),
             reason: "stored secret was empty".into(),
         });
@@ -209,12 +206,12 @@ fn decode_descriptor_key(
     let decoded = general_purpose::STANDARD
         .decode(trimmed)
         .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(trimmed))
-        .map_err(|err| DescriptorKeyLookupError::InvalidFormat {
+        .map_err(|err| EmbeddingKeyLookupError::InvalidFormat {
             user: user.to_string(),
             reason: format!("base64 decode failed: {err}"),
         })?;
 
-    DescriptorKey::from_user_bytes(user, decoded)
+    EmbeddingKey::from_user_bytes(user, decoded)
 }
 
 #[cfg(test)]
@@ -254,19 +251,19 @@ mod tests {
     }
 
     #[test]
-    fn decode_descriptor_key_accepts_padded_base64() {
+    fn decode_embedding_key_accepts_padded_base64() {
         let raw = [0xABu8; AES_GCM_KEY_BYTES];
         let encoded = general_purpose::STANDARD.encode(raw);
-        let key = decode_descriptor_key("alice", &encoded).unwrap();
+        let key = decode_embedding_key("alice", &encoded).unwrap();
         assert_eq!(key.as_bytes(), &raw);
     }
 
     #[test]
-    fn decode_descriptor_key_rejects_short_values() {
+    fn decode_embedding_key_rejects_short_values() {
         let encoded = general_purpose::STANDARD.encode([0xCDu8; 4]);
-        let err = decode_descriptor_key("bob", &encoded).unwrap_err();
+        let err = decode_embedding_key("bob", &encoded).unwrap_err();
         match err {
-            DescriptorKeyLookupError::InvalidFormat { user, reason } => {
+            EmbeddingKeyLookupError::InvalidFormat { user, reason } => {
                 assert_eq!(user, "bob");
                 assert!(reason.contains("expected"));
             }

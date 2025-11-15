@@ -12,11 +12,11 @@ The README MUST expose a table of contents after the opening overview so readers
 - **THEN** they see a Markdown list of links covering (at least) Overview, Why This Project, Getting Started, Usage, Configuration, Testing, and License anchors in that order.
 
 ### Requirement: Why This Project Highlights Secret Service Security
-The README MUST explain why the project is secure by design, emphasizing Secret Service–backed descriptor encryption and the reduced need for root.
+The README MUST explain why the project is secure by design, emphasizing Secret Service–backed embedding encryption and the reduced need for root.
 
 #### Scenario: Why section sells security benefits
 - **WHEN** a reader opens the "Why This Project" section
-- **THEN** it states that descriptor files are encrypted via GNOME Secret Service (AES-GCM) so leaked files remain unreadable
+- **THEN** it states that embedding files are encrypted via GNOME Secret Service (AES-GCM) so leaked files remain unreadable
 - **AND** it clarifies that everyday enrollment runs without `root` because Secret Service operates in the user session (only PAM wiring under `/etc/pam.d` needs elevated rights).
 
 ### Requirement: Prerequisites Detail Package Installs And Dlib Models
@@ -38,20 +38,16 @@ The README MUST spell out how to deploy binaries, config files, models, and PAM 
 - **THEN** it provides steps for installing `chissu-cli`, placing `libpam_chissu.so`, copying `/etc/chissu-pam/config.toml` (or `/usr/local/etc/...`), storing dlib weights, and wiring `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`.
 
 ### Requirement: Usage Documents chissu-cli Enroll Flow
-Usage MUST include examples for enrolling faces via the CLI, including elevated and non-elevated patterns.
+Usage MUST include examples for enrolling faces via the CLI, including elevated and non-elevated patterns, using embedding-oriented flags and outputs.
 
 #### Scenario: Standard enroll example included
 - **WHEN** someone reads Usage → Enrollment
-- **THEN** they see a command example for `chissu-cli enroll` that references the landmark/encoder models and explains default target user behavior.
-
-#### Scenario: sudo example included
-- **WHEN** they need to enroll another account
-- **THEN** the README shows a `sudo chissu-cli enroll --user <name>` example (or equivalent) and explains why elevation is necessary for cross-user enrollment.
+- **THEN** they see a command example for `chissu-cli enroll` that references the landmark/encoder models, explains default target user behavior, and shows embedding terminology for outputs/IDs.
 
 ### Requirement: Configuration Section Explains chissu-pam TOML
-A dedicated Configuration section MUST explain `chissu-pam`'s TOML files, precedence, and common keys.
+A dedicated Configuration section MUST explain `chissu-pam` TOML files, precedence, and common keys using embedding-oriented names, while noting legacy descriptor key compatibility during transition.
 
 #### Scenario: Config precedence documented
 - **WHEN** an operator opens the Configuration section
-- **THEN** it lists `/etc/chissu-pam/config.toml` and `/usr/local/etc/chissu-pam/config.toml`, describes how CLI/PAM fall back across them, and highlights important keys (device, pixel format, descriptor_store_dir, similarity thresholds, Secret Service toggles, etc.).
+- **THEN** it lists `/etc/chussu-pam/config.toml` and `/usr/local/etc/chussu-pam/config.toml`, describes how CLI/PAM fall back across them, and highlights important keys (device, pixel format, embedding_store_dir with legacy descriptor_store_dir alias, similarity thresholds, Secret Service toggles, etc.).
 

@@ -28,7 +28,7 @@ pub struct Cli {
 pub enum Commands {
     /// Capture a single frame from an infrared-capable webcam
     Capture(CaptureArgs),
-    /// Capture, extract, and enroll descriptors in one step
+    /// Capture, extract, and enroll embeddings in one step
     Enroll(EnrollArgs),
     /// Operations that work with facial feature extraction pipelines
     #[command(subcommand)]
@@ -40,13 +40,13 @@ pub enum Commands {
 
 #[derive(Debug, Subcommand)]
 pub enum FacesCommands {
-    /// Extract face descriptors from an existing PNG image
+    /// Extract face embeddings from an existing PNG image
     Extract(FaceExtractArgs),
-    /// Compare face descriptor files produced by the extract command
+    /// Compare face embedding files produced by the extract command
     Compare(FaceCompareArgs),
-    /// Enroll descriptors into a per-user feature store
+    /// Enroll embeddings into a per-user feature store
     Enroll(FaceEnrollArgs),
-    /// Remove descriptors from a per-user feature store
+    /// Remove embeddings from a per-user feature store
     Remove(FaceRemoveArgs),
 }
 
@@ -108,7 +108,7 @@ pub struct EnrollArgs {
     #[arg(long)]
     pub user: Option<String>,
 
-    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
+    /// Optional directory that stores enrolled embeddings (overrides config/env defaults)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 
@@ -124,7 +124,7 @@ pub struct EnrollArgs {
     #[arg(long)]
     pub encoder_model: Option<PathBuf>,
 
-    /// Number of image jitters to run before encoding (controls descriptor stability)
+    /// Number of image jitters to run before encoding (controls embedding stability)
     #[arg(long, default_value_t = 1)]
     pub jitters: u32,
 }
@@ -142,22 +142,22 @@ pub struct FaceExtractArgs {
     #[arg(long)]
     pub encoder_model: Option<PathBuf>,
 
-    /// Optional output file for serialized descriptors (defaults to captures/features/<timestamp>.json)
+    /// Optional output file for serialized embeddings (defaults to captures/features/<timestamp>.json)
     #[arg(long)]
     pub output: Option<PathBuf>,
 
-    /// Number of image jitters to run before encoding (controls descriptor stability)
+    /// Number of image jitters to run before encoding (controls embedding stability)
     #[arg(long, default_value_t = 1)]
     pub jitters: u32,
 }
 
 #[derive(Debug, Args)]
 pub struct FaceCompareArgs {
-    /// Path to the descriptor JSON exported by `faces extract`
+    /// Path to the embedding JSON exported by `faces extract`
     #[arg(long)]
     pub input: PathBuf,
 
-    /// Descriptor JSON paths to compare against the input (repeatable)
+    /// Embedding JSON paths to compare against the input (repeatable)
     #[arg(long = "compare-target", required = true)]
     pub compare_targets: Vec<PathBuf>,
 }
@@ -168,10 +168,10 @@ pub struct FaceEnrollArgs {
     #[arg(long)]
     pub user: String,
 
-    /// Path to the descriptor JSON exported by `faces extract`
-    pub descriptor: PathBuf,
+    /// Path to the embedding JSON exported by `faces extract`
+    pub embedding: PathBuf,
 
-    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
+    /// Optional directory that stores enrolled embeddings (overrides config/env defaults)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }
@@ -180,22 +180,22 @@ pub struct FaceEnrollArgs {
 #[command(group(
     ArgGroup::new("selector")
         .required(true)
-        .args(["descriptor_id", "all"]),
+        .args(["embedding_id", "all"]),
 ))]
 pub struct FaceRemoveArgs {
     /// Target operating system user name
     #[arg(long)]
     pub user: String,
 
-    /// Descriptor identifier to remove (repeat flag to delete multiple)
-    #[arg(long, conflicts_with = "all")]
-    pub descriptor_id: Vec<String>,
+    /// Embedding identifier to remove (repeat flag to delete multiple)
+    #[arg(long = "embedding-id", conflicts_with = "all")]
+    pub embedding_id: Vec<String>,
 
-    /// Remove all descriptors for the user
+    /// Remove all embeddings for the user
     #[arg(long)]
     pub all: bool,
 
-    /// Optional directory that stores enrolled descriptors (overrides config/env defaults)
+    /// Optional directory that stores enrolled embeddings (overrides config/env defaults)
     #[arg(long)]
     pub store_dir: Option<PathBuf>,
 }

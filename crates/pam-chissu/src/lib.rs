@@ -12,8 +12,8 @@ use chissu_config::{self, ConfigError, ResolvedConfig, ResolvedConfigWithSource}
 use chissu_face_core::capture::{capture_frame_in_memory, CaptureConfig, DeviceLocator};
 use chissu_face_core::errors::AppError;
 use chissu_face_core::faces::{
-    cosine_similarity, load_enrolled_descriptors, validate_user_name, DlibBackend,
-    EnrolledDescriptor, FaceEmbeddingBackend, FaceExtractionConfig,
+    cosine_similarity, load_enrolled_embeddings, validate_user_name, DlibBackend,
+    EnrolledEmbedding, FaceEmbeddingBackend, FaceExtractionConfig,
 };
 use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
@@ -204,7 +204,7 @@ impl PamLogger {
 
 #[derive(Debug, Clone, Copy)]
 enum FailureReason {
-    DescriptorsMissing,
+    EmbeddingsMissing,
     NoFaceDetected,
     ThresholdNotReached,
 }
@@ -301,9 +301,9 @@ pub unsafe extern "C" fn pam_sm_authenticate(
             .failure_reason
             .unwrap_or(FailureReason::ThresholdNotReached)
         {
-            FailureReason::DescriptorsMissing => "no enrolled descriptors",
+            FailureReason::EmbeddingsMissing => "no enrolled embeddings",
             FailureReason::NoFaceDetected => "no face detected in captured frames",
-            FailureReason::ThresholdNotReached => "no descriptor met similarity threshold",
+            FailureReason::ThresholdNotReached => "no embedding met similarity threshold",
         };
         logger.warn(&format!(
             "Authentication failed: {} (frames={}, best_similarity={:.4}).",
@@ -313,8 +313,8 @@ pub unsafe extern "C" fn pam_sm_authenticate(
             .failure_reason
             .unwrap_or(FailureReason::ThresholdNotReached)
         {
-            FailureReason::DescriptorsMissing => format!(
-                "Face authentication unavailable: no enrolled descriptors for '{}'.",
+            FailureReason::EmbeddingsMissing => format!(
+                "Face authentication unavailable: no enrolled embeddings for '{}'.",
                 request.user
             ),
             FailureReason::NoFaceDetected => {
@@ -358,26 +358,26 @@ fn authenticate_user(
         logger.info("No configuration file found; using built-in defaults");
     }
 
-    let mut descriptor_key: Option<Vec<u8>> = None;
+    let mut embedding_key: Option<Vec<u8>> = None;
 
     if config.require_secret_service {
         match run_secret_service_helper(&request.user, config.capture_timeout) {
             Ok(HelperResponse::Key(key_bytes)) => {
                 logger.info(&format!(
-                    "Secret Service helper returned descriptor key ({} bytes) for user '{}' via service '{}' — proceeding",
+                    "Secret Service helper returned embedding key ({} bytes) for user '{}' via service '{}' — proceeding",
                     key_bytes.len(),
                     request.user,
                     default_service_name(),
                 ));
-                descriptor_key = Some(key_bytes);
+                embedding_key = Some(key_bytes);
             }
             Ok(HelperResponse::Missing { message }) => {
                 logger.warn(&format!(
-                    "Descriptor key missing for user '{}': {message}",
+                    "Embedding key missing for user '{}': {message}",
                     request.user
                 ));
                 return Ok(AuthResult::failure(
-                    FailureReason::DescriptorsMissing,
+                    FailureReason::EmbeddingsMissing,
                     f64::NEG_INFINITY,
                     0,
                 ));
@@ -395,16 +395,16 @@ fn authenticate_user(
         logger.info("Secret Service probe disabled via configuration; continuing without check");
     }
 
-    let descriptors = load_descriptor_store(&config, request, logger, &mut descriptor_key)?;
-    if descriptors.is_empty() {
+    let embeddings = load_embedding_store(&config, request, logger, &mut embedding_key)?;
+    if embeddings.is_empty() {
         return Ok(AuthResult::failure(
-            FailureReason::DescriptorsMissing,
+            FailureReason::EmbeddingsMissing,
             f64::NEG_INFINITY,
             0,
         ));
     }
 
-    let descriptor_len = verify_enrolled_descriptors(&descriptors)?;
+    let embedding_len = verify_enrolled_embeddings(&embeddings)?;
 
     let capture_config = build_capture_config(&config);
     let embedder = build_embedder(&config)?;
@@ -441,21 +441,20 @@ fn authenticate_user(
                 } else {
                     detected_any_face = true;
                     for rec in faces {
-                        if rec.descriptor.len() != descriptor_len {
+                        if rec.embedding.len() != embedding_len {
                             return Err(AuthError::Config(format!(
-                                "Descriptor length mismatch: enrolled {} vs captured {}",
-                                descriptor_len,
-                                rec.descriptor.len()
+                                "Embedding length mismatch: enrolled {} vs captured {}",
+                                embedding_len,
+                                rec.embedding.len()
                             )));
                         }
-                        let similarity =
-                            best_similarity_against_store(&rec.descriptor, &descriptors);
+                        let similarity = best_similarity_against_store(&rec.embedding, &embeddings);
                         if similarity > best_similarity {
                             best_similarity = similarity;
                         }
                         if similarity >= config.similarity_threshold {
                             logger.info(&format!(
-                        "Detected matching descriptor (similarity={similarity:.4}) after {frames_captured} frame(s)"
+                        "Detected matching embedding (similarity={similarity:.4}) after {frames_captured} frame(s)"
                     ));
                             return Ok(AuthResult::success(similarity, frames_captured));
                         }
@@ -497,33 +496,33 @@ fn authenticate_user(
     ))
 }
 
-fn verify_enrolled_descriptors(descriptors: &[EnrolledDescriptor]) -> PamResult<usize> {
-    let expected = descriptors
+fn verify_enrolled_embeddings(embeddings: &[EnrolledEmbedding]) -> PamResult<usize> {
+    let expected = embeddings
         .first()
-        .ok_or_else(|| AuthError::Config("descriptor store unexpectedly empty".into()))?
-        .descriptor
+        .ok_or_else(|| AuthError::Config("embedding store unexpectedly empty".into()))?
+        .embedding
         .len();
     if expected == 0 {
         return Err(AuthError::Config(
-            "stored descriptors have zero length".into(),
+            "stored embeddings have zero length".into(),
         ));
     }
-    for record in descriptors {
-        if record.descriptor.len() != expected {
+    for record in embeddings {
+        if record.embedding.len() != expected {
             return Err(AuthError::Config(format!(
-                "descriptor length mismatch: expected {}, found {}",
+                "embedding length mismatch: expected {}, found {}",
                 expected,
-                record.descriptor.len()
+                record.embedding.len()
             )));
         }
     }
     Ok(expected)
 }
 
-fn best_similarity_against_store(candidate: &[f64], store: &[EnrolledDescriptor]) -> f64 {
+fn best_similarity_against_store(candidate: &[f64], store: &[EnrolledEmbedding]) -> f64 {
     let mut best = f64::NEG_INFINITY;
     for record in store {
-        let similarity = cosine_similarity(candidate, &record.descriptor);
+        let similarity = cosine_similarity(candidate, &record.embedding);
         if similarity > best {
             best = similarity;
         }
@@ -567,38 +566,38 @@ fn gray_to_rgb(image: &image::GrayImage) -> RgbImage {
     rgb
 }
 
-fn load_descriptor_store(
+fn load_embedding_store(
     config: &ResolvedConfig,
     request: &PamRequest,
     logger: &mut PamLogger,
-    descriptor_key: &mut Option<Vec<u8>>,
-) -> PamResult<Vec<EnrolledDescriptor>> {
+    embedding_key: &mut Option<Vec<u8>>,
+) -> PamResult<Vec<EnrolledEmbedding>> {
     loop {
-        match load_enrolled_descriptors(
-            Some(config.descriptor_store_dir.as_path()),
+        match load_enrolled_embeddings(
+            Some(config.embedding_store_dir.as_path()),
             &request.user,
-            descriptor_key.as_deref(),
+            embedding_key.as_deref(),
         ) {
-            Ok(descriptors) => return Ok(descriptors),
+            Ok(embeddings) => return Ok(embeddings),
             Err(AppError::EncryptedStoreRequiresKey { .. }) => {
-                if descriptor_key.is_some() {
+                if embedding_key.is_some() {
                     return Err(AuthError::SecretServiceUnavailable(
-                        "Secret Service key failed to decrypt descriptor store".into(),
+                        "Secret Service key failed to decrypt embedding store".into(),
                     ));
                 }
                 match run_secret_service_helper(&request.user, config.capture_timeout) {
                     Ok(HelperResponse::Key(bytes)) => {
                         logger.info(&format!(
-                            "Secret Service helper returned descriptor key ({} bytes) for user '{}' via service '{}' — retrying store load",
+                            "Secret Service helper returned embedding key ({} bytes) for user '{}' via service '{}' — retrying store load",
                             bytes.len(),
                             request.user,
                             default_service_name(),
                         ));
-                        *descriptor_key = Some(bytes);
+                        *embedding_key = Some(bytes);
                     }
                     Ok(HelperResponse::Missing { message }) => {
                         logger.warn(&format!(
-                            "Descriptor key missing for user '{}': {message}",
+                            "Embedding key missing for user '{}': {message}",
                             request.user
                         ));
                         return Err(AuthError::SecretServiceUnavailable(message));
@@ -734,18 +733,18 @@ mod tests {
         assert_eq!(loaded.video_device, chissu_config::DEFAULT_VIDEO_DEVICE);
         assert_eq!(loaded.pixel_format, chissu_config::DEFAULT_PIXEL_FORMAT);
         assert_eq!(
-            loaded.descriptor_store_dir,
+            loaded.embedding_store_dir,
             PathBuf::from(chissu_config::DEFAULT_STORE_DIR)
         );
         assert!(!loaded.require_secret_service);
     }
 
     #[test]
-    fn verify_enrolled_descriptors_detects_mismatch() {
-        let descriptors = vec![
-            EnrolledDescriptor {
+    fn verify_enrolled_embeddings_detects_mismatch() {
+        let embeddings = vec![
+            EnrolledEmbedding {
                 id: "a".into(),
-                descriptor: vec![0.1, 0.2, 0.3],
+                embedding: vec![0.1, 0.2, 0.3],
                 bounding_box: BoundingBox {
                     left: 0,
                     top: 0,
@@ -755,9 +754,9 @@ mod tests {
                 source: "input.json".into(),
                 created_at: "2025-01-01T00:00:00Z".into(),
             },
-            EnrolledDescriptor {
+            EnrolledEmbedding {
                 id: "b".into(),
-                descriptor: vec![0.1, 0.2],
+                embedding: vec![0.1, 0.2],
                 bounding_box: BoundingBox {
                     left: 0,
                     top: 0,
@@ -769,18 +768,16 @@ mod tests {
             },
         ];
 
-        let err = verify_enrolled_descriptors(&descriptors).unwrap_err();
-        assert!(
-            matches!(err, AuthError::Config(msg) if msg.contains("descriptor length mismatch"))
-        );
+        let err = verify_enrolled_embeddings(&embeddings).unwrap_err();
+        assert!(matches!(err, AuthError::Config(msg) if msg.contains("embedding length mismatch")));
     }
 
     #[test]
     fn best_similarity_reports_peak_value() {
         let store = vec![
-            EnrolledDescriptor {
+            EnrolledEmbedding {
                 id: "a".into(),
-                descriptor: vec![1.0, 0.0, 0.0],
+                embedding: vec![1.0, 0.0, 0.0],
                 bounding_box: BoundingBox {
                     left: 0,
                     top: 0,
@@ -790,9 +787,9 @@ mod tests {
                 source: "a.json".into(),
                 created_at: "2025-01-01T00:00:00Z".into(),
             },
-            EnrolledDescriptor {
+            EnrolledEmbedding {
                 id: "b".into(),
-                descriptor: vec![0.0, 1.0, 0.0],
+                embedding: vec![0.0, 1.0, 0.0],
                 bounding_box: BoundingBox {
                     left: 0,
                     top: 0,
