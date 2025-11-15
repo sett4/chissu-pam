@@ -1,5 +1,7 @@
+mod logind;
 mod secret_helper;
 
+use std::env;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -18,11 +20,15 @@ use chissu_face_core::faces::{
 use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
 use libc::{c_int, free};
+use logind::LogindInspector;
+use nix::unistd::User;
 use pam_sys::{
     get_item, get_user, ConvClosure, PamConversation, PamHandle, PamItemType, PamMessage,
     PamMessageStyle, PamResponse, PamReturnCode,
 };
-use secret_helper::{run_secret_service_helper, HelperError as SecretHelperError, HelperResponse};
+use secret_helper::{
+    run_secret_service_helper, HelperEnvOverrides, HelperError as SecretHelperError, HelperResponse,
+};
 use syslog::{Facility, Formatter3164, Logger, LoggerBackend};
 use thiserror::Error;
 
@@ -47,6 +53,7 @@ enum AuthError {
 #[derive(Debug)]
 struct PamRequest {
     user: String,
+    tty: Option<String>,
 }
 
 struct PamConversationMessenger {
@@ -265,7 +272,12 @@ pub unsafe extern "C" fn pam_sm_authenticate(
 
     let mut messenger = PamConversationMessenger::new(pamh, &mut logger);
 
-    let request = PamRequest { user };
+    let tty = unsafe { get_tty_name(pamh) };
+    if let Some(ref tty_name) = tty {
+        logger.debug(&format!("PAM provided tty '{tty_name}'"));
+    }
+
+    let request = PamRequest { user, tty };
     logger.info(&format!(
         "Starting face authentication for user '{}'.",
         request.user
@@ -359,9 +371,12 @@ fn authenticate_user(
     }
 
     let mut embedding_key: Option<Vec<u8>> = None;
+    let mut helper_env: Option<HelperEnvOverrides> = None;
 
     if config.require_secret_service {
-        match run_secret_service_helper(&request.user, config.capture_timeout) {
+        helper_env = prepare_helper_env(request, logger);
+        match run_secret_service_helper(&request.user, config.capture_timeout, helper_env.as_ref())
+        {
             Ok(HelperResponse::Key(key_bytes)) => {
                 logger.info(&format!(
                     "Secret Service helper returned embedding key ({} bytes) for user '{}' via service '{}' — proceeding",
@@ -395,7 +410,13 @@ fn authenticate_user(
         logger.info("Secret Service probe disabled via configuration; continuing without check");
     }
 
-    let embeddings = load_embedding_store(&config, request, logger, &mut embedding_key)?;
+    let embeddings = load_embedding_store(
+        &config,
+        request,
+        logger,
+        &mut embedding_key,
+        helper_env.as_ref(),
+    )?;
     if embeddings.is_empty() {
         return Ok(AuthResult::failure(
             FailureReason::EmbeddingsMissing,
@@ -571,6 +592,7 @@ fn load_embedding_store(
     request: &PamRequest,
     logger: &mut PamLogger,
     embedding_key: &mut Option<Vec<u8>>,
+    helper_env: Option<&HelperEnvOverrides>,
 ) -> PamResult<Vec<EnrolledEmbedding>> {
     loop {
         match load_enrolled_embeddings(
@@ -585,7 +607,7 @@ fn load_embedding_store(
                         "Secret Service key failed to decrypt embedding store".into(),
                     ));
                 }
-                match run_secret_service_helper(&request.user, config.capture_timeout) {
+                match run_secret_service_helper(&request.user, config.capture_timeout, helper_env) {
                     Ok(HelperResponse::Key(bytes)) => {
                         logger.info(&format!(
                             "Secret Service helper returned embedding key ({} bytes) for user '{}' via service '{}' — retrying store load",
@@ -632,6 +654,71 @@ fn load_config() -> PamResult<ResolvedConfigWithSource> {
     chissu_config::load_resolved_config().map_err(map_config_error)
 }
 
+fn prepare_helper_env(request: &PamRequest, logger: &mut PamLogger) -> Option<HelperEnvOverrides> {
+    let needs = HelperEnvNeeds::detect();
+    if !needs.any() {
+        logger.debug("DISPLAY/DBUS/XDG already present; skipping logind environment hydration");
+        return None;
+    }
+
+    let uid = match lookup_uid(&request.user) {
+        Ok(uid) => uid,
+        Err(err) => {
+            logger.warn(&format!(
+                "Unable to resolve UID for user '{}' while preparing Secret Service env: {err}",
+                request.user
+            ));
+            return None;
+        }
+    };
+
+    let inspector = LogindInspector::new();
+    match inspector.inspect(uid, request.tty.as_deref()) {
+        Ok(Some(env)) => {
+            let pairs: Vec<(String, String)> = env
+                .env_pairs()
+                .into_iter()
+                .filter(|(key, _)| needs.accepts(key))
+                .collect();
+            if pairs.is_empty() {
+                logger.debug(
+                    "Logind session found but no missing environment variables required overrides",
+                );
+                None
+            } else {
+                logger.info(&format!(
+                    "Recovered session environment from logind for user '{}': {}",
+                    request.user,
+                    env.summary()
+                ));
+                Some(HelperEnvOverrides::from_pairs(pairs))
+            }
+        }
+        Ok(None) => {
+            logger.warn(&format!(
+                "No active logind session for user '{}' (tty hint {})",
+                request.user,
+                request.tty.as_deref().unwrap_or("-")
+            ));
+            None
+        }
+        Err(err) => {
+            logger.warn(&format!(
+                "Failed to query logind for user '{}': {err}",
+                request.user
+            ));
+            None
+        }
+    }
+}
+
+fn lookup_uid(user: &str) -> Result<u32, String> {
+    match User::from_name(user).map_err(|err| format!("failed to resolve user '{user}': {err}"))? {
+        Some(info) => Ok(info.uid.as_raw()),
+        None => Err(format!("user '{user}' not found")),
+    }
+}
+
 fn map_config_error(err: ConfigError) -> AuthError {
     match err {
         ConfigError::Read { path, source } => {
@@ -640,6 +727,43 @@ fn map_config_error(err: ConfigError) -> AuthError {
         ConfigError::Parse { path, message } => {
             AuthError::Config(format!("Failed to parse {}: {}", path.display(), message))
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HelperEnvNeeds {
+    display: bool,
+    runtime: bool,
+    dbus: bool,
+}
+
+impl HelperEnvNeeds {
+    fn detect() -> Self {
+        Self {
+            display: env_var_missing("DISPLAY"),
+            runtime: env_var_missing("XDG_RUNTIME_DIR"),
+            dbus: env_var_missing("DBUS_SESSION_BUS_ADDRESS"),
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.display || self.runtime || self.dbus
+    }
+
+    fn accepts(&self, key: &str) -> bool {
+        match key {
+            "DISPLAY" | "WAYLAND_DISPLAY" => self.display,
+            "XDG_RUNTIME_DIR" => self.runtime,
+            "DBUS_SESSION_BUS_ADDRESS" => self.dbus,
+            _ => false,
+        }
+    }
+}
+
+fn env_var_missing(name: &str) -> bool {
+    match env::var_os(name) {
+        Some(value) => value.is_empty(),
+        None => true,
     }
 }
 
@@ -657,6 +781,25 @@ unsafe fn get_user_name(pamh: *mut PamHandle) -> PamResult<String> {
         return Err(AuthError::Pam("pam_get_user returned null".into()));
     }
     Ok(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+}
+
+unsafe fn get_tty_name(pamh: *mut PamHandle) -> Option<String> {
+    if pamh.is_null() {
+        return None;
+    }
+    let handle = &*pamh;
+    let mut ptr: *const c_void = ptr::null();
+    let rc = get_item(handle, PamItemType::TTY, &mut ptr);
+    if rc != PamReturnCode::SUCCESS || ptr.is_null() {
+        return None;
+    }
+    let raw = CStr::from_ptr(ptr as *const c_char).to_string_lossy();
+    let value = raw.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {

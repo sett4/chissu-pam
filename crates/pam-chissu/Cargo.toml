@@ -19,6 +19,7 @@ image = { version = "0.24", default-features = false, features = ["png"] }
 thiserror = "1.0"
 nix = { version = "0.28", default-features = false, features = ["process", "signal", "user"] }
 base64 = "0.21"
+zbus = { version = "4.4", default-features = false, features = ["async-io", "blocking"] }
 
 [dev-dependencies]
 tempfile = "3"

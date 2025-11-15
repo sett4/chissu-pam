@@ -32,6 +32,7 @@ This repository is in an early, exploratory phase: interfaces move quickly, pers
 - Linux with Video4Linux2 (V4L2) support and an infrared-capable webcam.
 - Rust 1.85 or newer (Edition 2024) plus `cargo` in your `$PATH`.
 - GNOME Secret Service (or another libsecret-compatible keyring) running in the target user session.
+- systemd-logind (via `systemd-logind.service`) with an active desktop session for every user that expects face unlock. PAM uses logind's `Display`, `Type`, and runtime environment to reach Secret Service during non-graphical prompts (polkit-1, 1Password, etc.).
 - Required kernel permissions to access `/dev/video*` devices.
 - System libraries needed by the dlib face-recognition bindings.
 
@@ -113,6 +114,36 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
     ```bash
     sudo echo test chissu-pam
     ```
+
+### Secret Service + logind troubleshooting
+
+`pam_chissu` now hydrates missing `$DISPLAY`, `$DBUS_SESSION_BUS_ADDRESS`, and `$XDG_RUNTIME_DIR` variables from systemd-logind whenever `require_secret_service = true`. This matters for PAM clients like polkit-1 (1Password unlock dialogs, GNOME Software updates, etc.) that invoke authentication without inheriting your desktop environment. Use these checks whenever the journal logs `Secret Service unavailable; skipping face authentication` or `No active logind session`:
+
+1. **Confirm the session exists**
+
+   ```bash
+   loginctl list-sessions
+   ```
+
+   Ensure the target user shows an `active` session bound to the expected `seat` and `tty`.
+
+2. **Inspect session properties**
+
+   ```bash
+   loginctl show-session <id> -p Display -p Type -p TTY -p Remote -p State
+   ```
+
+   The helper copies `Display` (e.g., `:0` or `wayland-0`) plus the runtime seat info before forking.
+
+3. **Verify the runtime directory**
+
+   ```bash
+   loginctl show-user $(id -u $USER) -p RuntimePath
+   ```
+
+   A valid runtime dir allows the helper to synthesize `unix:path=$XDG_RUNTIME_DIR/bus` for Secret Service.
+
+Successful hydration emits `Recovered session environment from logind for user 'alice': session=3 tty=tty2 seat=seat0 type=wayland ...` in syslog. If you instead see `No active logind session for user 'alice' (tty hint tty2)` the PAM stack will fall back to passwords until that desktop session is running/unlocked.
 
 ## Workspace layout
 

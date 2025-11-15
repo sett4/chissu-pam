@@ -26,6 +26,10 @@ Getting Started MUST enumerate prerequisites with concrete installation guidance
 - **WHEN** someone reads Getting Started → Prerequisites
 - **THEN** they find example package commands (e.g., `sudo apt install libdlib-dev libopenblas-dev liblapack-dev`) plus the base Rust toolchain requirements.
 
+#### Scenario: logind dependency noted
+- **WHEN** a maintainer studies the prerequisites
+- **THEN** it spells out that systemd-logind must be running so PAM can recover `$DISPLAY`/`$DBUS_SESSION_BUS_ADDRESS`/`$XDG_RUNTIME_DIR`, and it references `loginctl list-sessions`/`show-session` for validation.
+
 #### Scenario: Dlib model downloads documented
 - **WHEN** they continue through Getting Started
 - **THEN** it lists the required dlib model filenames, download location (https://dlib.net/files/), and where to store or reference them for CLI runs.
@@ -50,4 +54,3 @@ A dedicated Configuration section MUST explain `chissu-pam` TOML files, preceden
 #### Scenario: Config precedence documented
 - **WHEN** an operator opens the Configuration section
 - **THEN** it lists `/etc/chussu-pam/config.toml` and `/usr/local/etc/chussu-pam/config.toml`, describes how CLI/PAM fall back across them, and highlights important keys (device, pixel format, embedding_store_dir with legacy descriptor_store_dir alias, similarity thresholds, Secret Service toggles, etc.).
-

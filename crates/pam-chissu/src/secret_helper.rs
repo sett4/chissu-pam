@@ -1,4 +1,5 @@
-use std::ffi::CString;
+use std::env;
+use std::ffi::{CString, OsString};
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -25,9 +26,29 @@ pub enum HelperError {
     IpcFailure(String),
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct HelperEnvOverrides {
+    vars: Vec<(OsString, OsString)>,
+}
+
+impl HelperEnvOverrides {
+    pub fn from_pairs(pairs: Vec<(String, String)>) -> Self {
+        let vars = pairs
+            .into_iter()
+            .map(|(k, v)| (OsString::from(k), OsString::from(v)))
+            .collect();
+        Self { vars }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &(OsString, OsString)> {
+        self.vars.iter()
+    }
+}
+
 pub fn run_secret_service_helper(
     user: &str,
     timeout: Duration,
+    env_overrides: Option<&HelperEnvOverrides>,
 ) -> Result<HelperResponse, HelperError> {
     let user_info = lookup_user(user)?;
     let (parent_stream, child_stream) =
@@ -36,7 +57,7 @@ pub fn run_secret_service_helper(
     match unsafe { fork() } {
         Ok(ForkResult::Child) => {
             drop(parent_stream);
-            child_entry(user_info, child_stream);
+            child_entry(user_info, child_stream, env_overrides);
         }
         Ok(ForkResult::Parent { child }) => {
             drop(child_stream);
@@ -57,7 +78,15 @@ fn lookup_user(user: &str) -> Result<User, HelperError> {
     }
 }
 
-fn child_entry(user: User, mut stream: UnixStream) -> ! {
+fn child_entry(
+    user: User,
+    mut stream: UnixStream,
+    env_overrides: Option<&HelperEnvOverrides>,
+) -> ! {
+    if let Some(overrides) = env_overrides {
+        apply_env_overrides(overrides);
+    }
+
     if let Err(message) = drop_privileges(&user) {
         emit_and_exit(
             &mut stream,
@@ -118,6 +147,12 @@ fn emit_and_exit(stream: &mut UnixStream, payload: HelperWireMessage) -> ! {
     let _ = write_payload(stream, &payload);
     let _ = stream.shutdown(Shutdown::Both);
     std::process::exit(0)
+}
+
+fn apply_env_overrides(overrides: &HelperEnvOverrides) {
+    for (key, value) in overrides.iter() {
+        env::set_var(key, value);
+    }
 }
 
 fn write_payload(stream: &mut UnixStream, payload: &HelperWireMessage) -> io::Result<()> {
@@ -243,6 +278,7 @@ enum HelperWireErrorKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
     fn translate_message_accepts_ok_payload() {
@@ -279,5 +315,25 @@ mod tests {
             HelperError::SecretServiceUnavailable(message) => assert_eq!(message, "locked"),
             _ => panic!("expected secret service error"),
         }
+    }
+
+    #[test]
+    fn helper_env_overrides_apply_variables() {
+        env::remove_var("DISPLAY");
+        env::remove_var("DBUS_SESSION_BUS_ADDRESS");
+        let overrides = HelperEnvOverrides::from_pairs(vec![
+            ("DISPLAY".into(), ":99".into()),
+            (
+                "DBUS_SESSION_BUS_ADDRESS".into(),
+                "unix:path=/tmp/fake-bus".into(),
+            ),
+        ]);
+        assert!(overrides.iter().next().is_some());
+        apply_env_overrides(&overrides);
+        assert_eq!(env::var("DISPLAY").as_deref(), Ok(":99"));
+        assert_eq!(
+            env::var("DBUS_SESSION_BUS_ADDRESS").as_deref(),
+            Ok("unix:path=/tmp/fake-bus")
+        );
     }
 }

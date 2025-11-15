@@ -410,7 +410,7 @@ pub(crate) fn run_face_enrollment_with_backend<B: EmbeddingKeyBackend>(
         existing.push(record);
         added.push(EnrollmentRecord {
             id,
-            embedding_len: embedding_len,
+            embedding_len,
             source: config.embedding.display().to_string(),
             created_at,
         });
