@@ -19,6 +19,6 @@ anyhow = "1.0"
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
-home = "0.5.12"
+home = "0.5.11"
 whoami = "1.5"
 libc = "0.2"
