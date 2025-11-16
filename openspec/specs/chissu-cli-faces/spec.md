@@ -1,8 +1,15 @@
-# face-features Specification
+# chissu-cli-faces Specification
 
 ## Purpose
-TBD - created by archiving change add-face-feature-extraction. Update Purpose after archive.
+Defines the CLI `faces` subcommands (extract, compare, enroll, remove) including embedding terminology and storage rules.
 ## Requirements
+### Requirement: Capability Naming Aligns With CLI
+- The capability MUST be named `chissu-cli-faces` to match the `chissu-cli faces` command and the naming pattern used by other CLI capabilities (e.g., `chissu-cli-capture`).
+
+#### Scenario: Spec name matches CLI command
+- **WHEN** contributors search specs for the `chissu-cli faces` subcommands
+- **THEN** they find the `chissu-cli-faces` capability and no longer see `face-features` as an active capability name.
+
 ### Requirement: Face Feature Extraction Command
 The CLI MUST provide a subcommand that loads an existing PNG image, detects faces, and computes embedding vectors (previously called descriptors) using dlib-based models while still accepting legacy terminology on the command line.
 
@@ -93,7 +100,7 @@ The removal flow MUST reuse the encrypted store format and Secret Service key so
 - **THEN** it fetches the user’s AES-GCM key from Secret Service, decrypts the store, removes the requested embeddings, and rewrites the store encrypted with the same key before exiting.
 
 ### Requirement: Config-Driven Auto Enrollment Command
-The CLI MUST expose a top-level `chissu-cli enroll` command that captures an infrared frame using the same configuration/default order defined in the `capture-cli` capability, runs face detection + embedding extraction, and immediately reuses the encrypted enrollment flow without requiring intermediate embedding files.
+The CLI MUST expose a top-level `chissu-cli enroll` command that captures an infrared frame using the same configuration/default order defined in the `chissu-cli-capture` capability, runs face detection + embedding extraction, and immediately reuses the encrypted enrollment flow without requiring intermediate embedding files.
 
 #### Scenario: End-to-end capture, extract, and enroll
 - **GIVEN** `/etc/chissu-pam/config.toml` defines `video_device = "/dev/video2"`, `pixel_format = "Y16"`, and `embedding_store_dir = "/srv/chissu/models"` (or the legacy `descriptor_store_dir`)
