@@ -1,8 +1,15 @@
-# face-features Specification
+# chissu-cli-faces Specification
 
 ## Purpose
-TBD - created by archiving change add-face-feature-extraction. Update Purpose after archive.
+Defines the CLI `faces` subcommands (extract, compare, enroll, remove) including embedding terminology and storage rules.
 ## Requirements
+### Requirement: Capability Naming Aligns With CLI
+- The capability MUST be named `chissu-cli-faces` to match the `chissu-cli faces` command and the naming pattern used by other CLI capabilities (e.g., `chissu-cli-capture`).
+
+#### Scenario: Spec name matches CLI command
+- **WHEN** contributors search specs for the `chissu-cli faces` subcommands
+- **THEN** they find the `chissu-cli-faces` capability and no longer see `face-features` as an active capability name.
+
 ### Requirement: Face Feature Extraction Command
 The CLI MUST provide a subcommand that loads an existing PNG image, detects faces, and computes embedding vectors (previously called descriptors) using dlib-based models while still accepting legacy terminology on the command line.
 
@@ -116,3 +123,4 @@ The automated enrollment command MUST infer the target user from the invoking Un
 #### Scenario: Non-root override is rejected
 - **WHEN** a non-root user runs `chissu-cli enroll --user bob`
 - **THEN** the command fails validation before any capture occurs, explaining that only root may override the user, and it exits with a non-zero status without touching any store files.
+
