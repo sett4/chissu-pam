@@ -59,7 +59,7 @@ impl DeviceLocator {
         }
     }
 
-    fn open(&self) -> Result<v4l::Device, AppError> {
+    pub fn open(&self) -> Result<v4l::Device, AppError> {
         match self {
             DeviceLocator::Index(index) => {
                 v4l::Device::new((*index) as usize).map_err(|err| AppError::DeviceOpen {

@@ -2,6 +2,7 @@ mod auto_enroll;
 mod capture;
 mod cli;
 mod config;
+mod doctor;
 mod errors;
 mod faces;
 mod keyring;
@@ -23,8 +24,8 @@ use crate::faces::{
     FaceComparisonConfig, FaceEnrollmentConfig, FaceExtractionConfig, FaceRemovalConfig,
 };
 use crate::output::{
-    render_auto_enroll, render_error, render_face_compare, render_face_enroll, render_face_remove,
-    render_face_success, render_success,
+    render_auto_enroll, render_doctor, render_error, render_face_compare, render_face_enroll,
+    render_face_remove, render_face_success, render_success,
 };
 
 fn main() -> ExitCode {
@@ -37,7 +38,7 @@ fn main() -> ExitCode {
     init_tracing(verbose, mode);
 
     match run(command, mode, verbose > 0) {
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(err) => {
             render_error(&err, mode);
             err.exit_code()
@@ -45,7 +46,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(command: Commands, mode: OutputMode, verbose: bool) -> Result<(), AppError> {
+fn run(command: Commands, mode: OutputMode, verbose: bool) -> Result<ExitCode, AppError> {
     match command {
         Commands::Capture(args) => {
             let capture_defaults = config_loader::load_capture_defaults()?;
@@ -72,6 +73,7 @@ fn run(command: Commands, mode: OutputMode, verbose: bool) -> Result<(), AppErro
             let config = capture::build_capture_config(&args, &capture_defaults);
             let outcome = capture::run_capture(&config)?;
             render_success(&outcome, mode)?;
+            return Ok(ExitCode::SUCCESS);
         }
         Commands::Enroll(args) => run_enroll(args, mode, verbose)?,
         Commands::Faces(cmd) => match cmd {
@@ -79,30 +81,47 @@ fn run(command: Commands, mode: OutputMode, verbose: bool) -> Result<(), AppErro
                 let config = FaceExtractionConfig::from(&args);
                 let outcome = faces::run_face_extraction(&config)?;
                 render_face_success(&outcome, mode)?;
+                return Ok(ExitCode::SUCCESS);
             }
             FacesCommands::Compare(args) => {
                 let config = FaceComparisonConfig::from(&args);
                 let outcome = faces::run_face_comparison(&config)?;
                 render_face_compare(&outcome, mode)?;
+                return Ok(ExitCode::SUCCESS);
             }
             FacesCommands::Enroll(mut args) => {
                 args.store_dir = config_loader::resolve_store_dir(args.store_dir.take())?;
                 let config = FaceEnrollmentConfig::from(&args);
                 let outcome = faces::run_face_enrollment(&config)?;
                 render_face_enroll(&outcome, mode)?;
+                return Ok(ExitCode::SUCCESS);
             }
             FacesCommands::Remove(mut args) => {
                 args.store_dir = config_loader::resolve_store_dir(args.store_dir.take())?;
                 let config = FaceRemovalConfig::from(&args);
                 let outcome = faces::run_face_removal(&config)?;
                 render_face_remove(&outcome, mode)?;
+                return Ok(ExitCode::SUCCESS);
             }
         },
         Commands::Keyring(cmd) => match cmd {
-            KeyringCommands::Check(_) => keyring::run_keyring_check(mode)?,
+            KeyringCommands::Check(_) => {
+                keyring::run_keyring_check(mode)?;
+                return Ok(ExitCode::SUCCESS);
+            }
         },
+        Commands::Doctor => {
+            let outcome = doctor::run_doctor()?;
+            render_doctor(&outcome, mode)?;
+            let exit = if outcome.ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            };
+            return Ok(exit);
+        }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_enroll(args: EnrollArgs, mode: OutputMode, verbose: bool) -> Result<(), AppError> {

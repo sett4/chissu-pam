@@ -420,6 +420,7 @@ dependencies = [
  "home",
  "image",
  "libc",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

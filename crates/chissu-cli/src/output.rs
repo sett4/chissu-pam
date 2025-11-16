@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use crate::auto_enroll::AutoEnrollOutcome;
 use crate::capture::CaptureOutcome;
 use crate::cli::OutputMode;
+use crate::doctor::{CheckStatus, DoctorOutcome};
 use crate::errors::{AppError, AppResult};
 use crate::faces::{
     FaceComparisonOutcome, FaceEnrollmentOutcome, FaceExtractionOutcome, FaceRemovalOutcome,
@@ -309,4 +310,40 @@ pub fn render_keyring_check(summary: &KeyringCheckSummary, mode: OutputMode) -> 
         }
     }
     Ok(())
+}
+
+pub fn render_doctor(outcome: &DoctorOutcome, mode: OutputMode) -> AppResult<()> {
+    match mode {
+        OutputMode::Human => {
+            for check in &outcome.checks {
+                println!(
+                    "[{}] {}: {}",
+                    display_status(check.status),
+                    check.name,
+                    check.message
+                );
+            }
+            if outcome.ok {
+                println!("All checks passed.");
+            } else {
+                println!("Some checks failed or warned; see details above.");
+            }
+        }
+        OutputMode::Json => {
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let payload = serde_json::to_string(outcome)?;
+            handle.write_all(payload.as_bytes())?;
+            handle.write_all(b"\n")?;
+        }
+    }
+    Ok(())
+}
+
+fn display_status(status: CheckStatus) -> &'static str {
+    match status {
+        CheckStatus::Pass => "PASS",
+        CheckStatus::Warn => "WARN",
+        CheckStatus::Fail => "FAIL",
+    }
 }

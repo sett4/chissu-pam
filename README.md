@@ -171,6 +171,17 @@ cargo build
 
 `chissu-cli` exposes capture, feature extraction, enrollment, and maintenance commands. Run the installed binary directly (preferred) or invoke `cargo run -p chissu-cli -- …` during development. Detailed capture/extraction/compare walkthroughs now live in [docs/chissu-cli.md](docs/chissu-cli.md) while the sections below focus on enrollment and PAM integration flows.
 
+### Environment doctor (`chissu-cli doctor`)
+
+Run a quick, non-destructive diagnostic to confirm PAM + enrollment prerequisites before debugging deeper issues:
+
+```bash
+chissu-cli doctor            # human-readable
+chissu-cli --json doctor | jq
+```
+
+Checks include config discovery/parse, video device access, embedding store permissions, dlib model readability, Secret Service availability, the PAM module location, and whether `/etc/pam.d/*` references `pam_chissu`. Exit code is `0` only when every check passes; warnings (e.g., both config files present) or failures return `1` with details per check.
+
 ### Enroll with live capture (`chissu-cli enroll`)
 
 Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes embeddings, encrypts them via Secret Service–managed AES-GCM keys, and deletes the temporary capture + embedding files once enrollment succeeds.

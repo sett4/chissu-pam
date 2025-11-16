@@ -36,6 +36,8 @@ pub enum Commands {
     /// Inspect Secret Service / keyring integration
     #[command(subcommand)]
     Keyring(KeyringCommands),
+    /// Run environment diagnostics for PAM and enrollment prerequisites
+    Doctor,
 }
 
 #[derive(Debug, Subcommand)]
