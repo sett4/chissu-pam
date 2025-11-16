@@ -50,10 +50,9 @@ Infrared tests MUST validate both the IR-specific logic and the shared CLI behav
 - **THEN** the test also asserts compliance with the shared CLI behavior requirement (correct warm-up discard, JSON schema), demonstrating how infrared capture extends but does not fork the capture CLI contract.
 
 ### Requirement: Infrared Mode Boundaries
-The infrared capture capability SHALL declare itself as a mode layered on top of the shared `capture-cli` behaviors, only adding IR-specific validation (device capabilities, pixel formats) and persistence rules.
+The infrared capture capability SHALL declare itself as a mode layered on top of the shared `chissu-cli-capture` behaviors, only adding IR-specific validation (device capabilities, pixel formats) and persistence rules.
 
 #### Scenario: Contributors know where to edit shared vs IR logic
 - **GIVEN** a maintainer needs to tweak warm-up logic or JSON structure for all capture modes
 - **WHEN** they inspect the infrared spec
-- **THEN** it states that such edits belong in `capture-cli`, while IR-only concerns (format validation, manual test guides) stay here.
-
+- **THEN** it states that such edits belong in `chissu-cli-capture`, while IR-only concerns (format validation, manual test guides) stay here.

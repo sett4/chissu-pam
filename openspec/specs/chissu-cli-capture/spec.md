@@ -1,7 +1,7 @@
-# capture-cli Specification
+# chissu-cli-capture Specification
 
 ## Purpose
-TBD - created by archiving change add-auto-exposure-gain. Update Purpose after archive.
+Defines the shared capture behaviors for `chissu-cli` capture subcommands (device defaults, auto exposure/gain, warm-up handling, diagnostics, and binary naming) that other capabilities reference.
 ## Requirements
 ### Requirement: Auto Exposure And Gain Controls
 The CLI SHALL let callers opt into device-provided automatic exposure and gain adjustments before capturing a frame.
@@ -61,22 +61,21 @@ The Secret Service diagnostic subcommand MUST remain defined in this capability 
 #### Scenario: Infrared spec links to diagnostics
 - **GIVEN** operators follow the `infrared-capture` documentation to verify their environment
 - **WHEN** they run `chissu-cli keyring check`
-- **THEN** the diagnostic behavior is defined only once in `capture-cli`, and the infrared spec simply references it rather than redefining command semantics.
+- **THEN** the diagnostic behavior is defined only once in `chissu-cli-capture`, and the infrared spec simply references it rather than redefining command semantics.
 
 ### Requirement: Shared Capture CLI Behavior
-Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors that live in the `capture-cli` capability: built-in defaults (device `/dev/video0`, pixel format `Y16`, four warm-up frames), config-file overrides, warm-up frame discarding, and dual output modes (`--json` vs human-readable).
+Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors that live in the `chissu-cli-capture` capability: built-in defaults (device `/dev/video0`, pixel format `Y16`, four warm-up frames), config-file overrides, warm-up frame discarding, and dual output modes (`--json` vs human-readable).
 
 #### Scenario: Any capture mode honors shared defaults
 - **GIVEN** `chissu-cli capture --json` is invoked without explicit `--device`, `--pixel-format`, or `--warmup-frames`
 - **WHEN** the capability referenced by the command needs those values
-- **THEN** the CLI resolves them using the shared default/config logic defined in `capture-cli`
+- **THEN** the CLI resolves them using the shared default/config logic defined in `chissu-cli-capture`
 - **AND** any capability-specific spec (e.g., `infrared-capture`) may only override values it explicitly documents.
 
 ### Requirement: Capture CLI Capability Scope Declaration
-The `capture-cli` spec MUST describe itself as the home for cross-cutting capture behaviors (controls, diagnostics, binary naming) so other capability specs can reference it instead of re-stating shared rules.
+- The capability MUST be named `chissu-cli-capture` and MUST own only shared capture behaviors (defaults, auto controls, keyring diagnostics, binary naming), excluding doctor command requirements.
 
-#### Scenario: Linked capability identifies shared owner
-- **GIVEN** another capability (e.g., `infrared-capture`) needs the CLI logging, auto control toggles, or diagnostic subcommands
-- **WHEN** contributors look up where to document or modify those behaviors
-- **THEN** the `capture-cli` spec explicitly states it owns them and points to the relevant requirements (auto controls, config defaults, keyring diagnostics, binary naming).
+#### Scenario: Capture-only scope documented
+- **WHEN** contributors look up where shared capture behaviors live
+- **THEN** they see the capability called `chissu-cli-capture` and no longer find doctor command requirements mixed into this spec.
 
