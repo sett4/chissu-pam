@@ -409,7 +409,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chissu-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chissu-config",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "chissu-config"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "chissu-face-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -1366,7 +1366,7 @@ dependencies = [
 
 [[package]]
 name = "pam-chissu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "chissu-config",
