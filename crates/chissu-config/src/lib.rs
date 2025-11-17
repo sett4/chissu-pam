@@ -8,7 +8,7 @@ use thiserror::Error;
 
 pub const PRIMARY_CONFIG_PATH: &str = "/etc/chissu-pam/config.toml";
 pub const SECONDARY_CONFIG_PATH: &str = "/usr/local/etc/chissu-pam/config.toml";
-pub const DEFAULT_SIMILARITY_THRESHOLD: f64 = 0.7;
+pub const DEFAULT_SIMILARITY_THRESHOLD: f64 = 0.9;
 pub const DEFAULT_TIMEOUT_SECS: u64 = 5;
 pub const DEFAULT_INTERVAL_MILLIS: u64 = 500;
 pub const DEFAULT_VIDEO_DEVICE: &str = "/dev/video0";

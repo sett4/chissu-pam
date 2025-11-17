@@ -39,7 +39,7 @@ sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu
 The module reads configuration from `/etc/chissu-pam/config.toml`. If the file is absent it falls back to `/usr/local/etc/chissu-pam/config.toml`. Both files are optional—defaults are used when neither exists. Developers adding new keys or validations must update `crates/chissu-config`, which is the shared loader used by both the PAM module and `chissu-cli`. Available keys:
 
 ```toml
-similarity_threshold = 0.75     # Float, default 0.7
+similarity_threshold = 0.75     # Float, default 0.9
 capture_timeout_secs = 8        # Integer seconds, default 5
 frame_interval_millis = 300     # Integer ms between samples, default 500
 video_device = "/dev/video2"   # String, default "/dev/video0"

@@ -210,7 +210,7 @@ The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Li
 - Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
 - Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so`) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
 - Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
-  - `similarity_threshold = 0.7`
+  - `similarity_threshold = 0.9`
   - `capture_timeout_secs = 5`
   - `frame_interval_millis = 500`
   - `video_device = "/dev/video0"`
@@ -244,7 +244,7 @@ The first file that exists wins for each key; CLI flags or environment variables
 | `warmup_frames`                                  | Number of frames to discard before saving.                                                 |
 | `embedding_store_dir`                           | Directory for encrypted embedding files (`/var/lib/chissu-pam/models`).                   |
 | `landmark_model` / `encoder_model`               | Paths to the dlib weights (overrideable via `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`). |
-| `similarity_threshold`                           | PAM acceptance threshold (default `0.7`).                                                  |
+| `similarity_threshold`                           | PAM acceptance threshold (default `0.9`).                                                  |
 | `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |
 | `jitters`                                        | Number of random jitters applied when encoding embeddings.                                 |
 | `require_secret_service`                         | Fail fast when the Secret Service helper cannot obtain a key.                              |
