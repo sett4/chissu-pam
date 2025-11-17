@@ -1,7 +1,13 @@
 pub use chissu_face_core::capture::*;
 
-use crate::cli::{CaptureArgs, DEFAULT_PIXEL_FORMAT, DEFAULT_WARMUP_FRAMES};
-use crate::config::CaptureDefaults;
+use std::any::Any;
+use std::process::ExitCode;
+
+use crate::cli::{CaptureArgs, OutputMode, DEFAULT_PIXEL_FORMAT, DEFAULT_WARMUP_FRAMES};
+use crate::commands::CommandHandler;
+use crate::config::{self, CaptureDefaults};
+use crate::errors::AppResult;
+use crate::output::render_success;
 
 pub fn build_capture_config(args: &CaptureArgs, defaults: &CaptureDefaults) -> CaptureConfig {
     let device = args.device.clone().or_else(|| defaults.device.clone());
@@ -26,6 +32,76 @@ pub fn build_capture_config(args: &CaptureArgs, defaults: &CaptureDefaults) -> C
         auto_gain: args.auto_gain,
         warmup_frames,
         output: args.output.clone(),
+    }
+}
+
+pub struct CaptureHandler {
+    args: CaptureArgs,
+    load_defaults: Box<dyn Fn() -> AppResult<CaptureDefaults> + Send + Sync>,
+    run_capture: Box<dyn Fn(&CaptureConfig) -> AppResult<CaptureOutcome> + Send + Sync>,
+    render: Box<dyn Fn(&CaptureOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
+}
+
+impl CaptureHandler {
+    pub fn new(args: CaptureArgs) -> Self {
+        Self::with_dependencies(
+            args,
+            config::load_capture_defaults,
+            run_capture,
+            render_success,
+        )
+    }
+
+    pub fn with_dependencies(
+        args: CaptureArgs,
+        load_defaults: impl Fn() -> AppResult<CaptureDefaults> + Send + Sync + 'static,
+        run_capture: impl Fn(&CaptureConfig) -> AppResult<CaptureOutcome> + Send + Sync + 'static,
+        render: impl Fn(&CaptureOutcome, OutputMode) -> AppResult<()> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            args,
+            load_defaults: Box::new(load_defaults),
+            run_capture: Box::new(run_capture),
+            render: Box::new(render),
+        }
+    }
+}
+
+impl CommandHandler for CaptureHandler {
+    fn execute(&self, mode: OutputMode, _verbose: bool) -> AppResult<ExitCode> {
+        let defaults = (self.load_defaults)()?;
+        log_capture_defaults(&self.args, &defaults);
+        let config = build_capture_config(&self.args, &defaults);
+        let outcome = (self.run_capture)(&config)?;
+        (self.render)(&outcome, mode)?;
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+fn log_capture_defaults(args: &CaptureArgs, defaults: &CaptureDefaults) {
+    if args.device.is_none() && defaults.device.is_none() {
+        tracing::info!(
+            target: "capture.defaults",
+            "No --device flag or config video_device found; defaulting to /dev/video0"
+        );
+    }
+    if args.pixel_format.is_none() && defaults.pixel_format.is_none() {
+        tracing::info!(
+            target: "capture.defaults",
+            "No --pixel-format flag or config pixel_format found; defaulting to {}",
+            DEFAULT_PIXEL_FORMAT
+        );
+    }
+    if args.warmup_frames.is_none() && defaults.warmup_frames.is_none() {
+        tracing::info!(
+            target: "capture.defaults",
+            "No --warmup-frames flag or config warmup_frames found; defaulting to {}",
+            DEFAULT_WARMUP_FRAMES
+        );
     }
 }
 
