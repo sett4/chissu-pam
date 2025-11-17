@@ -347,7 +347,7 @@ impl<'a> ControlApplier<'a> {
             return Ok(CaptureControlReport::default());
         }
 
-        let controls = match catch_unwind_silent(|| device.query_controls()) {
+        let controls = match catch_unwind_silent(AssertUnwindSafe(|| device.query_controls())) {
             Ok(Ok(list)) => list,
             Ok(Err(err)) => {
                 self.logs.push(format!("Unable to query controls: {err}"));
@@ -780,11 +780,11 @@ fn normalize_control_name(name: &str) -> String {
 
 fn catch_unwind_silent<F, T>(f: F) -> std::thread::Result<T>
 where
-    F: FnOnce() -> T,
+    F: FnOnce() -> T + panic::UnwindSafe,
 {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(|_| {}));
-    let result = panic::catch_unwind(AssertUnwindSafe(f));
+    let result = panic::catch_unwind(f);
     panic::set_hook(hook);
     result
 }
