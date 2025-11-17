@@ -131,6 +131,28 @@ sudo scripts/install-chissu.sh \
 - Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
 - Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
 
+#### Build a Debian package (Ubuntu)
+
+When you need an installable `.deb` for Ubuntu/Debian hosts, run the packaging
+script after producing release binaries:
+
+```bash
+scripts/build-deb.sh
+```
+
+The helper recompiles `chissu-cli` and `pam-chissu` in release mode (unless you
+pass `--skip-build`), stages the binaries under the appropriate filesystem
+prefixes, adds the default config to `usr/share/doc/chissu-pam/examples`, and
+generates `dist/chissu-pam_<version>_amd64.deb`. Customize the build with:
+
+- `--version` – override the package version (defaults to `[workspace.package]`).
+- `--arch` – set the Debian architecture string (e.g., `arm64`).
+- `--depends` – provide a comma-separated dependency list for the control file.
+- `--artifact-dir`/`--output-dir` – point at existing artifacts or change the
+  destination directory.
+
+Install the resulting package with `sudo apt install ./dist/chissu-pam_*_amd64.deb`.
+
 ### Secret Service + logind troubleshooting
 
 `pam_chissu` now hydrates missing `$DISPLAY`, `$DBUS_SESSION_BUS_ADDRESS`, and `$XDG_RUNTIME_DIR` variables from systemd-logind whenever `require_secret_service = true`. This matters for PAM clients like polkit-1 (1Password unlock dialogs, GNOME Software updates, etc.) that invoke authentication without inheriting your desktop environment. Use these checks whenever the journal logs `Secret Service unavailable; skipping face authentication` or `No active logind session`:
