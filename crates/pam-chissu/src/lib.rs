@@ -15,7 +15,8 @@ use chissu_face_core::capture::{capture_frame_in_memory, CaptureConfig, DeviceLo
 use chissu_face_core::errors::AppError;
 use chissu_face_core::faces::{
     cosine_similarity, load_enrolled_embeddings, validate_user_name, DlibBackend,
-    EnrolledEmbedding, FaceEmbeddingBackend, FaceExtractionConfig,
+    EnrolledEmbedding, EnvModelPathResolver, FaceEmbeddingBackend, FaceExtractionConfig,
+    ModelPathResolver,
 };
 use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
@@ -567,14 +568,16 @@ fn build_capture_config(config: &ResolvedConfig) -> CaptureConfig {
 }
 
 fn build_embedder(config: &ResolvedConfig) -> PamResult<DlibBackend> {
-    let models = FaceExtractionConfig {
+    let extractor_config = FaceExtractionConfig {
         image: PathBuf::new(),
         landmark_model: config.landmark_model.clone(),
         encoder_model: config.encoder_model.clone(),
         output: None,
         jitters: config.jitters,
-    }
-    .resolve_models()?;
+    };
+    let models = EnvModelPathResolver
+        .resolve(&extractor_config)
+        .map_err(AuthError::from)?;
     DlibBackend::new(&models).map_err(AuthError::from)
 }
 
