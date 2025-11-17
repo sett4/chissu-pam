@@ -882,7 +882,7 @@ mod tests {
             loaded.embedding_store_dir,
             PathBuf::from(chissu_config::DEFAULT_STORE_DIR)
         );
-        assert!(!loaded.require_secret_service);
+        assert!(loaded.require_secret_service);
     }
 
     #[test]

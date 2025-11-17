@@ -50,7 +50,7 @@ The CLI and PAM module need the official dlib weights:
 - `shape_predictor_68_face_landmarks.dat`
 - `dlib_face_recognition_resnet_model_v1.dat`
 
-Download them from https://dlib.net/files/ once, then store them in a shared location (for example `/var/lib/chissu-pam/dllib-models`). Point `chissu-cli` at the files via CLI flags or entries in `config.toml`.
+Download them from https://dlib.net/files/ once, then store them in a shared location (for example `/var/lib/chissu-pam/dlib-models`). Point `chissu-cli` at the files via CLI flags or entries in `config.toml`.
 
 ### Installation
 
@@ -72,10 +72,10 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
    sudo mkdir -p /var/lib/chissu-pam/models
    sudo chmod 0666 /var/lib/chissu-pam/models
 
-   sudo mkdir -p /var/lib/chissu-pam/dllib-models
-   sudo curl https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 -o /var/lib/chissu-pam/dllib-models/shape_predictor_68_face_landmarks.dat.bz2
-   sudo curl https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2 -o /var/lib/chissu-pam/dllib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
-   sudo bunzip2 /var/lib/chissu-pam/dllib-models/shape_predictor_68_face_landmarks.dat.bz2 /var/lib/chissu-pam/dllib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
+   sudo mkdir -p /var/lib/chissu-pam/dlib-models
+   sudo curl https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 -o /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2
+   sudo curl https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2 -o /var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
+   sudo bunzip2 /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2 /var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
    ```
 
 4. **Install the PAM module**:
@@ -86,7 +86,7 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 
 5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `embedding_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
 
-6. **Store dlib weights** under a readable directory (for example `/var/lib/chissu-pam/dllib-models`) and update the config or environment variables so both CLI and PAM know where to load them.
+6. **Store dlib weights** under a readable directory (for example `/var/lib/chissu-pam/dlib-models`) and update the config or environment variables so both CLI and PAM know where to load them.
 
 7. **Wire PAM** by editing the relevant `/etc/pam.d/<service>` entry:
 
@@ -114,6 +114,22 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
     ```bash
     sudo echo test chissu-pam
     ```
+
+#### Automated installer (Ubuntu/Rocky)
+
+If you already have release artifacts (or a downloaded bundle) you can let the repo script place files and dependencies for you:
+
+```bash
+sudo scripts/install-chissu.sh \
+  --artifact-dir target/release \
+  --model-dir /var/lib/chissu-pam/dlib-models \
+  --store-dir /var/lib/chissu-pam/models
+```
+
+- Auto-detects Ubuntu/Debian vs Rocky Linux, installs required packages (apt or dnf + EPEL/CRB), and puts the PAM module in `/lib/security` (Debian/Ubuntu) or `/usr/lib64/security` (Rocky, with `restorecon` when available).
+- Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{models,dlib-models}` exist. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
+- Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
+- Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
 
 ### Secret Service + logind troubleshooting
 
@@ -242,7 +258,7 @@ The first file that exists wins for each key; CLI flags or environment variables
 | `video_device`                                   | Default V4L2 path (`/dev/video0` fallback).                                                |
 | `pixel_format`                                   | Negotiated capture pixel format (`Y16` fallback).                                          |
 | `warmup_frames`                                  | Number of frames to discard before saving.                                                 |
-| `embedding_store_dir`                           | Directory for encrypted embedding files (`/var/lib/chissu-pam/models`).                   |
+| `embedding_store_dir`                            | Directory for encrypted embedding files (`/var/lib/chissu-pam/models`).                    |
 | `landmark_model` / `encoder_model`               | Paths to the dlib weights (overrideable via `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`). |
 | `similarity_threshold`                           | PAM acceptance threshold (default `0.9`).                                                  |
 | `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |
