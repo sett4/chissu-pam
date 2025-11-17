@@ -14,7 +14,7 @@ pub const DEFAULT_INTERVAL_MILLIS: u64 = 500;
 pub const DEFAULT_VIDEO_DEVICE: &str = "/dev/video0";
 pub const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/models";
 pub const DEFAULT_PIXEL_FORMAT: &str = "Y16";
-pub const DEFAULT_WARMUP_FRAMES: u32 = 0;
+pub const DEFAULT_WARMUP_FRAMES: u32 = 4;
 pub const DEFAULT_JITTERS: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -74,7 +74,7 @@ impl ResolvedConfig {
             jitters: raw.jitters.unwrap_or(DEFAULT_JITTERS),
             landmark_model: raw.landmark_model,
             encoder_model: raw.encoder_model,
-            require_secret_service: raw.require_secret_service.unwrap_or(false),
+            require_secret_service: raw.require_secret_service.unwrap_or(true),
         }
     }
 }
