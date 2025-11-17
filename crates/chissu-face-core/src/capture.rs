@@ -7,16 +7,22 @@ use chrono::Utc;
 use image::codecs::png::PngEncoder;
 use image::{ColorType, GrayImage, ImageEncoder};
 use tracing::debug;
-use v4l::buffer::Type;
 use v4l::capability::{Capabilities, Flags as CapabilityFlags};
 use v4l::control::{Control, Description, Type as ControlType, Value};
 use v4l::format::{Format, FourCC};
 use v4l::framesize::FrameSizeEnum;
-use v4l::io::mmap::Stream;
-use v4l::io::traits::CaptureStream;
-use v4l::video::Capture;
 
 use crate::errors::{AppError, AppResult};
+
+mod device;
+
+use self::device::{
+    CaptureDevice, CaptureDeviceFactory, CaptureSink, FileCaptureSink, V4lCaptureDevice,
+};
+
+const CID_EXPOSURE_AUTO: u32 = 0x009a0901;
+const CID_EXPOSURE_ABSOLUTE: u32 = 0x009a0902;
+const CID_GAIN: u32 = 0x00980913;
 
 #[derive(Debug, Clone)]
 pub struct CaptureConfig {
@@ -124,107 +130,452 @@ pub struct InMemoryCapture {
 }
 
 pub fn capture_frame_in_memory(config: &CaptureConfig) -> AppResult<InMemoryCapture> {
+    let mut device = V4lCaptureDevice::open(&config.device)?;
+    capture_with_device(config, &mut device)
+}
+
+fn capture_with_device(
+    config: &CaptureConfig,
+    device: &mut dyn CaptureDevice,
+) -> AppResult<InMemoryCapture> {
     let mut logs = Vec::new();
-    let mut device = config.device.open()?;
     logs.push(format!("Opened device {}", config.device.display()));
     debug!("device" = config.device.display(), "opened" = true);
 
-    let caps = device.query_caps()?;
-    ensure_capabilities(&caps)?;
-    let device_summary = DeviceSummary {
-        driver: caps.driver.clone(),
-        card: caps.card.clone(),
-        bus_info: caps.bus.clone(),
-        path: config.device.display(),
-    };
-    logs.push(format!(
-        "Device: driver={} card={} bus={}",
-        device_summary.driver, device_summary.card, device_summary.bus_info
-    ));
+    let mut verifier = CapabilityVerifier::new(config);
+    let device_summary = verifier.verify(device)?;
+    logs.extend(verifier.into_logs());
 
-    let requested_fourcc = parse_fourcc(&config.pixel_format)
-        .map_err(|_| AppError::UnsupportedFormat(config.pixel_format.clone()))?;
-    ensure_format_supported(&device, requested_fourcc)?;
-    logs.push(format!("Pixel format {} supported", config.pixel_format));
+    let mut negotiator = FormatNegotiator::new(config);
+    let negotiated = negotiator.negotiate(device)?;
+    logs.extend(negotiator.into_logs());
 
-    if let Some((width, height)) = config.width.zip(config.height) {
-        ensure_framesize_supported(&device, requested_fourcc, width, height, &mut logs)?;
-    }
+    let mut control_applier = ControlApplier::new(config);
+    let control_report = control_applier.apply(device)?;
+    logs.extend(control_applier.into_logs());
 
-    let mut format = device.format()?;
-    format.fourcc = requested_fourcc;
-    if let Some(width) = config.width {
-        format.width = width;
-    }
-    if let Some(height) = config.height {
-        format.height = height;
-    }
-    let format = device.set_format(&format)?;
-    let negotiated = NegotiatedFormat {
-        pixel_format: fourcc_to_string(format.fourcc),
-        width: format.width,
-        height: format.height,
-    };
-    logs.push(format!(
-        "Negotiated format: {} {}x{}",
-        negotiated.pixel_format, negotiated.width, negotiated.height
-    ));
-
-    let control_report = apply_controls(&mut device, config, &mut logs)?;
-
-    let mut stream = Stream::with_buffers(&device, Type::VideoCapture, 4)?;
-    if config.warmup_frames > 0 {
-        logs.push(format!(
-            "Discarding {} warm-up frame(s) before capture",
-            config.warmup_frames
-        ));
-        for idx in 0..config.warmup_frames {
-            let _ = stream.next().map_err(|err| {
-                AppError::FrameProcessing(format!(
-                    "failed to read warm-up frame {}: {}",
-                    idx + 1,
-                    err
-                ))
-            })?;
-        }
-    }
-
-    let (data, _) = stream.next()?;
-    let image = convert_frame_to_image(data, &format)?;
+    let mut reader = FrameReader::new(config);
+    let image = reader.read(device, &negotiated.raw_format)?;
+    logs.extend(reader.into_logs());
 
     Ok(InMemoryCapture {
         image,
         device: device_summary,
-        format: negotiated,
+        format: negotiated.public_format,
         control: control_report,
         logs,
     })
 }
 
+pub struct CapturePipelineBuilder {
+    device_factory: Box<CaptureDeviceFactory>,
+    sink: Box<dyn CaptureSink>,
+}
+
+impl Default for CapturePipelineBuilder {
+    fn default() -> Self {
+        Self {
+            device_factory: Box::new(|locator: &DeviceLocator| {
+                Ok(Box::new(V4lCaptureDevice::open(locator)?))
+            }),
+            sink: Box::new(FileCaptureSink),
+        }
+    }
+}
+
+impl CapturePipelineBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_device_factory(mut self, factory: Box<CaptureDeviceFactory>) -> Self {
+        self.device_factory = factory;
+        self
+    }
+
+    pub fn with_sink(mut self, sink: Box<dyn CaptureSink>) -> Self {
+        self.sink = sink;
+        self
+    }
+
+    pub fn run(&self, config: &CaptureConfig) -> AppResult<CaptureOutcome> {
+        let mut device = (self.device_factory)(&config.device)?;
+        let mut capture = capture_with_device(config, device.as_mut())?;
+        let requested = config.output.as_deref();
+        let output_path = self.sink.store(&capture.image, requested)?;
+        capture
+            .logs
+            .push(format!("Saved frame to {}", output_path.display()));
+
+        let summary = CaptureSummary {
+            success: true,
+            output_path: output_path.display().to_string(),
+            device: capture.device,
+            format: capture.format,
+            exposure: config.exposure,
+            gain: config.gain,
+            auto_exposure: capture.control.auto_exposure,
+            auto_gain: capture.control.auto_gain,
+        };
+
+        Ok(CaptureOutcome {
+            summary,
+            logs: capture.logs,
+        })
+    }
+}
+
 pub fn run_capture(config: &CaptureConfig) -> AppResult<CaptureOutcome> {
-    let mut capture = capture_frame_in_memory(config)?;
+    CapturePipelineBuilder::default().run(config)
+}
 
-    let output_path = ensure_output_path(config.output.as_ref())?;
-    write_image(&capture.image, &output_path)?;
-    capture
-        .logs
-        .push(format!("Saved frame to {}", output_path.display()));
+struct CapabilityVerifier<'a> {
+    config: &'a CaptureConfig,
+    logs: Vec<String>,
+}
 
-    let summary = CaptureSummary {
-        success: true,
-        output_path: output_path.display().to_string(),
-        device: capture.device,
-        format: capture.format,
-        exposure: config.exposure,
-        gain: config.gain,
-        auto_exposure: capture.control.auto_exposure,
-        auto_gain: capture.control.auto_gain,
-    };
+impl<'a> CapabilityVerifier<'a> {
+    fn new(config: &'a CaptureConfig) -> Self {
+        Self {
+            config,
+            logs: Vec::new(),
+        }
+    }
 
-    Ok(CaptureOutcome {
-        summary,
-        logs: capture.logs,
-    })
+    fn verify(&mut self, device: &mut dyn CaptureDevice) -> AppResult<DeviceSummary> {
+        let caps = device.query_caps()?;
+        ensure_capabilities(&caps)?;
+        let summary = DeviceSummary {
+            driver: caps.driver.clone(),
+            card: caps.card.clone(),
+            bus_info: caps.bus.clone(),
+            path: self.config.device.display(),
+        };
+        self.logs.push(format!(
+            "Device: driver={} card={} bus={}",
+            summary.driver, summary.card, summary.bus_info
+        ));
+        Ok(summary)
+    }
+
+    fn into_logs(self) -> Vec<String> {
+        self.logs
+    }
+}
+
+#[derive(Debug)]
+struct FormatNegotiationResult {
+    raw_format: Format,
+    public_format: NegotiatedFormat,
+}
+
+struct FormatNegotiator<'a> {
+    config: &'a CaptureConfig,
+    logs: Vec<String>,
+}
+
+impl<'a> FormatNegotiator<'a> {
+    fn new(config: &'a CaptureConfig) -> Self {
+        Self {
+            config,
+            logs: Vec::new(),
+        }
+    }
+
+    fn negotiate(&mut self, device: &mut dyn CaptureDevice) -> AppResult<FormatNegotiationResult> {
+        let requested_fourcc = parse_fourcc(&self.config.pixel_format)
+            .map_err(|_| AppError::UnsupportedFormat(self.config.pixel_format.clone()))?;
+        ensure_format_supported(device, requested_fourcc)?;
+        self.logs.push(format!(
+            "Pixel format {} supported",
+            self.config.pixel_format
+        ));
+
+        if let Some((width, height)) = self.config.width.zip(self.config.height) {
+            ensure_framesize_supported(device, requested_fourcc, width, height, &mut self.logs)?;
+        }
+
+        let mut format = device.format()?;
+        format.fourcc = requested_fourcc;
+        if let Some(width) = self.config.width {
+            format.width = width;
+        }
+        if let Some(height) = self.config.height {
+            format.height = height;
+        }
+        let format = device.set_format(&format)?;
+        let negotiated = NegotiatedFormat {
+            pixel_format: fourcc_to_string(format.fourcc),
+            width: format.width,
+            height: format.height,
+        };
+        self.logs.push(format!(
+            "Negotiated format: {} {}x{}",
+            negotiated.pixel_format, negotiated.width, negotiated.height
+        ));
+
+        Ok(FormatNegotiationResult {
+            raw_format: format,
+            public_format: negotiated,
+        })
+    }
+
+    fn into_logs(self) -> Vec<String> {
+        self.logs
+    }
+}
+
+struct ControlApplier<'a> {
+    config: &'a CaptureConfig,
+    logs: Vec<String>,
+}
+
+impl<'a> ControlApplier<'a> {
+    fn new(config: &'a CaptureConfig) -> Self {
+        Self {
+            config,
+            logs: Vec::new(),
+        }
+    }
+
+    fn apply(&mut self, device: &mut dyn CaptureDevice) -> AppResult<CaptureControlReport> {
+        if self.config.exposure.is_none()
+            && self.config.gain.is_none()
+            && !self.config.auto_exposure
+            && !self.config.auto_gain
+        {
+            return Ok(CaptureControlReport::default());
+        }
+
+        let controls = match catch_unwind_silent(|| device.query_controls()) {
+            Ok(Ok(list)) => list,
+            Ok(Err(err)) => {
+                self.logs.push(format!("Unable to query controls: {err}"));
+                return Ok(self.apply_fallback_controls(device));
+            }
+            Err(_) => {
+                self.logs.push(
+                    "Unable to query controls: driver reported an unsupported control type".into(),
+                );
+                return Ok(self.apply_fallback_controls(device));
+            }
+        };
+
+        let mut report = CaptureControlReport::default();
+        let mut auto_exposure_active = false;
+        let mut auto_gain_active = false;
+
+        if self.config.auto_exposure {
+            match find_control(
+                &controls,
+                &[
+                    "Exposure, Auto",
+                    "Exposure Auto",
+                    "Auto Exposure",
+                    "Auto_Exposure",
+                ],
+            ) {
+                Some(ctrl) => {
+                    let value = auto_control_value(ctrl);
+                    match device.set_control(Control { id: ctrl.id, value }) {
+                        Ok(_) => {
+                            self.logs
+                                .push(format!("Enabled auto exposure via '{}'", ctrl.name));
+                            report.auto_exposure = Some("applied".into());
+                            auto_exposure_active = true;
+                        }
+                        Err(err) => {
+                            self.logs
+                                .push(format!("Failed to enable auto exposure: {err}"));
+                            report.auto_exposure = Some("failed".into());
+                        }
+                    }
+                }
+                None => {
+                    self.logs.push("Auto exposure control not supported".into());
+                    report.auto_exposure = Some("unsupported".into());
+                }
+            }
+        }
+
+        if self.config.auto_gain {
+            match find_control(
+                &controls,
+                &["Gain, Auto", "Auto Gain", "Gain Auto", "Gain Automatic"],
+            ) {
+                Some(ctrl) => {
+                    let value = auto_control_value(ctrl);
+                    match device.set_control(Control { id: ctrl.id, value }) {
+                        Ok(_) => {
+                            self.logs
+                                .push(format!("Enabled auto gain via '{}'", ctrl.name));
+                            report.auto_gain = Some("applied".into());
+                            auto_gain_active = true;
+                        }
+                        Err(err) => {
+                            self.logs.push(format!("Failed to enable auto gain: {err}"));
+                            report.auto_gain = Some("failed".into());
+                        }
+                    }
+                }
+                None => {
+                    self.logs.push("Auto gain control not supported".into());
+                    report.auto_gain = Some("unsupported".into());
+                }
+            }
+        }
+
+        if let Some(exposure) = self.config.exposure {
+            if auto_exposure_active {
+                self.logs.push(
+                    "Skipping manual exposure control because auto exposure is already active"
+                        .into(),
+                );
+            } else {
+                match device.set_control(Control {
+                    id: CID_EXPOSURE_ABSOLUTE,
+                    value: Value::Integer(exposure as i64),
+                }) {
+                    Ok(_) => self.logs.push(format!("Set exposure to {exposure}")),
+                    Err(err) => self.logs.push(format!(
+                        "Failed to set manual exposure to {exposure}: {err}"
+                    )),
+                }
+            }
+        }
+
+        if let Some(gain) = self.config.gain {
+            if auto_gain_active {
+                self.logs.push(
+                    "Skipping manual gain control because auto gain is already active".into(),
+                );
+            } else {
+                match device.set_control(Control {
+                    id: CID_GAIN,
+                    value: Value::Integer(gain as i64),
+                }) {
+                    Ok(_) => self.logs.push(format!("Set gain to {gain}")),
+                    Err(err) => self
+                        .logs
+                        .push(format!("Failed to set manual gain to {gain}: {err}")),
+                }
+            }
+        }
+
+        Ok(report)
+    }
+
+    fn apply_fallback_controls(&mut self, device: &mut dyn CaptureDevice) -> CaptureControlReport {
+        const V4L2_EXPOSURE_APERTURE_PRIORITY: i64 = 3;
+
+        let mut report = CaptureControlReport::default();
+
+        self.logs
+            .push("Falling back to legacy control IDs due to query failure".into());
+
+        if self.config.auto_exposure {
+            match device.set_control(Control {
+                id: CID_EXPOSURE_AUTO,
+                value: Value::Integer(V4L2_EXPOSURE_APERTURE_PRIORITY),
+            }) {
+                Ok(_) => {
+                    self.logs.push(
+                        "Enabled auto exposure via fallback control (aperture priority)".into(),
+                    );
+                    report.auto_exposure = Some("applied".into());
+                }
+                Err(err) => {
+                    self.logs.push(format!(
+                        "Failed to enable auto exposure via fallback control: {err}"
+                    ));
+                    report.auto_exposure = Some("failed".into());
+                }
+            }
+        } else if self.config.exposure.is_some() {
+            self.logs
+                .push("Skipping fallback auto exposure because manual exposure requested".into());
+        }
+
+        if let Some(exposure) = self.config.exposure {
+            match device.set_control(Control {
+                id: CID_EXPOSURE_ABSOLUTE,
+                value: Value::Integer(exposure as i64),
+            }) {
+                Ok(_) => self
+                    .logs
+                    .push(format!("Set exposure to {exposure} via fallback control")),
+                Err(err) => self.logs.push(format!(
+                    "Failed to set exposure via fallback control: {err}"
+                )),
+            }
+        }
+
+        if self.config.auto_gain {
+            self.logs
+                .push("Auto gain control fallback not available in legacy path".into());
+            report.auto_gain = Some("unsupported".into());
+        }
+
+        if let Some(gain) = self.config.gain {
+            match device.set_control(Control {
+                id: CID_GAIN,
+                value: Value::Integer(gain as i64),
+            }) {
+                Ok(_) => self
+                    .logs
+                    .push(format!("Set gain to {gain} via fallback control")),
+                Err(err) => self
+                    .logs
+                    .push(format!("Failed to set gain via fallback control: {err}")),
+            }
+        }
+
+        report
+    }
+
+    fn into_logs(self) -> Vec<String> {
+        self.logs
+    }
+}
+
+struct FrameReader<'a> {
+    config: &'a CaptureConfig,
+    logs: Vec<String>,
+}
+
+impl<'a> FrameReader<'a> {
+    fn new(config: &'a CaptureConfig) -> Self {
+        Self {
+            config,
+            logs: Vec::new(),
+        }
+    }
+
+    fn read(&mut self, device: &mut dyn CaptureDevice, format: &Format) -> AppResult<GrayImage> {
+        let mut stream = device.start_stream(4)?;
+        if self.config.warmup_frames > 0 {
+            self.logs.push(format!(
+                "Discarding {} warm-up frame(s) before capture",
+                self.config.warmup_frames
+            ));
+            for idx in 0..self.config.warmup_frames {
+                stream.next().map_err(|err| {
+                    AppError::FrameProcessing(format!(
+                        "failed to read warm-up frame {}: {}",
+                        idx + 1,
+                        err
+                    ))
+                })?;
+            }
+        }
+
+        let data = stream.next()?;
+        convert_frame_to_image(&data, format)
+    }
+
+    fn into_logs(self) -> Vec<String> {
+        self.logs
+    }
 }
 
 fn ensure_capabilities(caps: &Capabilities) -> AppResult<()> {
@@ -243,7 +594,7 @@ fn ensure_capabilities(caps: &Capabilities) -> AppResult<()> {
     }
 }
 
-fn ensure_format_supported(device: &v4l::Device, requested: FourCC) -> AppResult<()> {
+fn ensure_format_supported(device: &mut dyn CaptureDevice, requested: FourCC) -> AppResult<()> {
     let formats = device.enum_formats()?;
     if formats.iter().any(|format| format.fourcc == requested) {
         Ok(())
@@ -253,7 +604,7 @@ fn ensure_format_supported(device: &v4l::Device, requested: FourCC) -> AppResult
 }
 
 fn ensure_framesize_supported(
-    device: &v4l::Device,
+    device: &mut dyn CaptureDevice,
     fourcc: FourCC,
     width: u32,
     height: u32,
@@ -290,136 +641,9 @@ pub struct CaptureControlReport {
     pub auto_exposure: Option<String>,
     pub auto_gain: Option<String>,
 }
-
-fn apply_controls(
-    device: &mut v4l::Device,
-    config: &CaptureConfig,
-    logs: &mut Vec<String>,
-) -> AppResult<CaptureControlReport> {
-    if config.exposure.is_none()
-        && config.gain.is_none()
-        && !config.auto_exposure
-        && !config.auto_gain
-    {
-        return Ok(CaptureControlReport::default());
-    }
-
-    let controls = match catch_unwind_silent(|| device.query_controls()) {
-        Ok(Ok(list)) => list,
-        Ok(Err(err)) => {
-            logs.push(format!("Unable to query controls: {err}"));
-            return Ok(apply_fallback_controls(device, config, logs));
-        }
-        Err(_) => {
-            logs.push(
-                "Unable to query controls: driver reported an unsupported control type".into(),
-            );
-            return Ok(apply_fallback_controls(device, config, logs));
-        }
-    };
-
-    let mut report = CaptureControlReport::default();
-    let mut auto_exposure_active = false;
-    let mut auto_gain_active = false;
-
-    if config.auto_exposure {
-        match find_control(
-            &controls,
-            &[
-                "Exposure, Auto",
-                "Exposure Auto",
-                "Auto Exposure",
-                "Auto_Exposure",
-            ],
-        ) {
-            Some(ctrl) => {
-                let value = auto_control_value(ctrl);
-                match device.set_control(Control { id: ctrl.id, value }) {
-                    Ok(_) => {
-                        logs.push(format!("Enabled auto exposure via '{}'", ctrl.name));
-                        report.auto_exposure = Some("applied".into());
-                        auto_exposure_active = true;
-                    }
-                    Err(err) => {
-                        logs.push(format!("Failed to enable auto exposure: {err}"));
-                        report.auto_exposure = Some("failed".into());
-                    }
-                }
-            }
-            None => {
-                logs.push("Auto exposure control not supported".into());
-                report.auto_exposure = Some("unsupported".into());
-            }
-        }
-    }
-
-    if config.auto_gain {
-        match find_control(
-            &controls,
-            &["Gain, Auto", "Auto Gain", "Gain Auto", "Gain Automatic"],
-        ) {
-            Some(ctrl) => {
-                let value = auto_control_value(ctrl);
-                match device.set_control(Control { id: ctrl.id, value }) {
-                    Ok(_) => {
-                        logs.push(format!("Enabled auto gain via '{}'", ctrl.name));
-                        report.auto_gain = Some("applied".into());
-                        auto_gain_active = true;
-                    }
-                    Err(err) => {
-                        logs.push(format!("Failed to enable auto gain: {err}"));
-                        report.auto_gain = Some("failed".into());
-                    }
-                }
-            }
-            None => {
-                logs.push("Auto gain control not supported".into());
-                report.auto_gain = Some("unsupported".into());
-            }
-        }
-    }
-
-    if let Some(exposure) = config.exposure {
-        if auto_exposure_active {
-            logs.push("Skipping manual exposure because auto exposure is active".into());
-        } else if let Some(ctrl) = find_control(
-            &controls,
-            &["Exposure (Absolute)", "Exposure", "Exposure Time Absolute"],
-        ) {
-            match device.set_control(Control {
-                id: ctrl.id,
-                value: Value::Integer(exposure as i64),
-            }) {
-                Ok(_) => logs.push(format!("Set exposure to {exposure}")),
-                Err(err) => logs.push(format!("Failed to set exposure: {err}")),
-            }
-        } else {
-            logs.push("Exposure control not supported".into());
-        }
-    }
-
-    if let Some(gain) = config.gain {
-        if auto_gain_active {
-            logs.push("Skipping manual gain because auto gain is active".into());
-        } else if let Some(ctrl) = find_control(&controls, &["Gain"]) {
-            match device.set_control(Control {
-                id: ctrl.id,
-                value: Value::Integer(gain as i64),
-            }) {
-                Ok(_) => logs.push(format!("Set gain to {gain}")),
-                Err(err) => logs.push(format!("Failed to set gain: {err}")),
-            }
-        } else {
-            logs.push("Gain control not supported".into());
-        }
-    }
-
-    Ok(report)
-}
-
-fn ensure_output_path(custom: Option<&PathBuf>) -> AppResult<PathBuf> {
+fn ensure_output_path(custom: Option<&Path>) -> AppResult<PathBuf> {
     let path = if let Some(path) = custom {
-        path.clone()
+        path.to_path_buf()
     } else {
         let dir = Path::new("captures");
         fs::create_dir_all(dir)?;
@@ -556,77 +780,13 @@ fn normalize_control_name(name: &str) -> String {
 
 fn catch_unwind_silent<F, T>(f: F) -> std::thread::Result<T>
 where
-    F: FnOnce() -> T + panic::UnwindSafe,
+    F: FnOnce() -> T,
 {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(|_| {}));
     let result = panic::catch_unwind(AssertUnwindSafe(f));
     panic::set_hook(hook);
     result
-}
-
-fn apply_fallback_controls(
-    device: &mut v4l::Device,
-    config: &CaptureConfig,
-    logs: &mut Vec<String>,
-) -> CaptureControlReport {
-    const CID_EXPOSURE_AUTO: u32 = 0x009a0901;
-    const CID_EXPOSURE_ABSOLUTE: u32 = 0x009a0902;
-    const CID_GAIN: u32 = 0x00980913;
-    const V4L2_EXPOSURE_APERTURE_PRIORITY: i64 = 3;
-
-    let mut report = CaptureControlReport::default();
-
-    logs.push("Falling back to legacy control IDs due to query failure".into());
-
-    if config.auto_exposure {
-        match device.set_control(Control {
-            id: CID_EXPOSURE_AUTO,
-            value: Value::Integer(V4L2_EXPOSURE_APERTURE_PRIORITY),
-        }) {
-            Ok(_) => {
-                logs.push("Enabled auto exposure via fallback control (aperture priority)".into());
-                report.auto_exposure = Some("applied".into());
-            }
-            Err(err) => {
-                logs.push(format!(
-                    "Failed to enable auto exposure via fallback control: {err}"
-                ));
-                report.auto_exposure = Some("failed".into());
-            }
-        }
-    } else if config.exposure.is_some() {
-        logs.push("Skipping fallback auto exposure because manual exposure requested".into());
-    }
-
-    if let Some(exposure) = config.exposure {
-        match device.set_control(Control {
-            id: CID_EXPOSURE_ABSOLUTE,
-            value: Value::Integer(exposure as i64),
-        }) {
-            Ok(_) => logs.push(format!("Set exposure to {exposure} via fallback control")),
-            Err(err) => logs.push(format!(
-                "Failed to set exposure via fallback control: {err}"
-            )),
-        }
-    }
-
-    if config.auto_gain {
-        logs.push("Auto gain control fallback not available in legacy path".into());
-        report.auto_gain = Some("unsupported".into());
-    }
-
-    if let Some(gain) = config.gain {
-        match device.set_control(Control {
-            id: CID_GAIN,
-            value: Value::Integer(gain as i64),
-        }) {
-            Ok(_) => logs.push(format!("Set gain to {gain} via fallback control")),
-            Err(err) => logs.push(format!("Failed to set gain via fallback control: {err}")),
-        }
-    }
-
-    report
 }
 
 fn auto_control_value(ctrl: &Description) -> Value {
@@ -651,11 +811,60 @@ fn auto_control_value(ctrl: &Description) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use super::device::{CaptureSink as TestCaptureSink, FakeCaptureDevice};
     use super::*;
+    use image::GrayImage;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+    use v4l::capability::Flags as CapabilityFlags;
+    use v4l::format::description::Flags as FormatFlags;
+    use v4l::framesize::{Discrete, FrameSize, FrameSizeEnum};
 
     fn build_format(fourcc: &str, width: u32, height: u32) -> Format {
         let fourcc = parse_fourcc(fourcc).expect("fourcc");
         Format::new(width, height, fourcc)
+    }
+
+    fn sample_config() -> CaptureConfig {
+        CaptureConfig {
+            device: DeviceLocator::Index(0),
+            pixel_format: "Y16".into(),
+            width: Some(2),
+            height: Some(2),
+            exposure: None,
+            gain: None,
+            auto_exposure: false,
+            auto_gain: false,
+            warmup_frames: 0,
+            output: None,
+        }
+    }
+
+    fn configure_fake_device(config: &CaptureConfig) -> FakeCaptureDevice {
+        let width = config.width.unwrap_or(2);
+        let height = config.height.unwrap_or(2);
+        let fourcc = parse_fourcc(&config.pixel_format).unwrap();
+        let mut fake = FakeCaptureDevice::new(Format::new(width, height, fourcc));
+        fake.caps.capabilities = CapabilityFlags::VIDEO_CAPTURE | CapabilityFlags::STREAMING;
+        fake.formats.push(v4l::format::Description {
+            index: 0,
+            typ: 0,
+            flags: FormatFlags::empty(),
+            description: config.pixel_format.clone(),
+            fourcc,
+        });
+        if let Some((w, h)) = config.width.zip(config.height) {
+            fake.framesizes.push(FrameSize {
+                index: 0,
+                fourcc,
+                typ: 0,
+                size: FrameSizeEnum::Discrete(Discrete {
+                    width: w,
+                    height: h,
+                }),
+            });
+        }
+        fake
     }
 
     #[test]
@@ -684,6 +893,98 @@ mod tests {
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);
         assert_eq!(image.as_raw(), &vec![10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn capability_verifier_requires_streaming_support() {
+        let config = sample_config();
+        let mut fake = configure_fake_device(&config);
+        fake.caps.capabilities = CapabilityFlags::VIDEO_CAPTURE;
+        let mut verifier = CapabilityVerifier::new(&config);
+        let err = verifier.verify(&mut fake).unwrap_err();
+        assert!(matches!(err, AppError::Capability(_)));
+    }
+
+    #[test]
+    fn format_negotiator_rejects_missing_framesize() {
+        let mut config = sample_config();
+        config.width = Some(4);
+        config.height = Some(4);
+        let mut fake = configure_fake_device(&config);
+        fake.framesizes.clear();
+        let mut negotiator = FormatNegotiator::new(&config);
+        let err = negotiator.negotiate(&mut fake).unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::UnsupportedFrameSize {
+                width: 4,
+                height: 4,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn frame_reader_discards_configured_warmups() {
+        let mut config = sample_config();
+        config.pixel_format = "GREY".into();
+        config.warmup_frames = 2;
+        let mut fake = configure_fake_device(&config);
+        fake.frames.push_back(vec![1, 1, 1, 1]);
+        fake.frames.push_back(vec![2, 2, 2, 2]);
+        fake.frames.push_back(vec![9, 8, 7, 6]);
+
+        let mut reader = FrameReader::new(&config);
+        let image = reader.read(&mut fake, &build_format("GREY", 2, 2)).unwrap();
+        assert_eq!(image.as_raw(), &vec![9, 8, 7, 6]);
+        assert!(fake.frames.is_empty());
+    }
+
+    #[test]
+    fn builder_uses_injected_device_and_sink() {
+        let mut config = sample_config();
+        config.output = Some(PathBuf::from("/tmp/fake.png"));
+        let mut fake = configure_fake_device(&config);
+        fake.frames.push_back(vec![0; 8]);
+
+        let device_slot = Arc::new(Mutex::new(Some(fake)));
+        let factory = {
+            let device_slot = device_slot.clone();
+            Box::new(move |_locator: &DeviceLocator| {
+                let device = device_slot.lock().unwrap().take().unwrap();
+                Ok(Box::new(device) as Box<dyn CaptureDevice>)
+            })
+        };
+
+        let sink_state = Arc::new(Mutex::new(Vec::new()));
+        let sink = LoggingSink {
+            writes: sink_state.clone(),
+        };
+
+        let builder = CapturePipelineBuilder::new()
+            .with_device_factory(factory)
+            .with_sink(Box::new(sink));
+
+        let outcome = builder.run(&config).expect("run builder");
+        assert_eq!(
+            outcome.summary.output_path,
+            config.output.as_ref().unwrap().display().to_string()
+        );
+        assert_eq!(sink_state.lock().unwrap().len(), 1);
+    }
+
+    struct LoggingSink {
+        writes: Arc<Mutex<Vec<PathBuf>>>,
+    }
+
+    impl TestCaptureSink for LoggingSink {
+        fn store(&self, _image: &GrayImage, requested: Option<&Path>) -> AppResult<PathBuf> {
+            let path = requested
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("captures/test.png"));
+            self.writes.lock().unwrap().push(path.clone());
+            Ok(path)
+        }
     }
 
     #[test]
