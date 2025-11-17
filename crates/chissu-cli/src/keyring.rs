@@ -3,9 +3,7 @@ use chissu_face_core::secret_service::{
     SecretServiceProbe,
 };
 
-use crate::cli::OutputMode;
 use crate::errors::AppResult;
-use crate::output::render_keyring_check;
 
 #[derive(Debug, Clone)]
 pub struct KeyringCheckSummary {
@@ -13,10 +11,9 @@ pub struct KeyringCheckSummary {
     pub service: String,
 }
 
-pub fn run_keyring_check(mode: OutputMode) -> AppResult<()> {
+pub fn run_keyring_check() -> AppResult<KeyringCheckSummary> {
     let user = whoami::username();
-    let summary = check_with_probe(&KeyringSecretServiceProbe, user)?;
-    render_keyring_check(&summary, mode)
+    check_with_probe(&KeyringSecretServiceProbe, user)
 }
 
 pub fn check_with_probe<P: SecretServiceProbe>(

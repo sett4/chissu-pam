@@ -1,0 +1,10 @@
+pub mod auto_enroll;
+pub mod capture;
+pub mod cli;
+pub mod commands;
+pub mod config;
+pub mod doctor;
+pub mod errors;
+pub mod faces;
+pub mod keyring;
+pub mod output;
