@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use chissu_cli::auto_enroll::AutoEnrollOutcome;
 use chissu_cli::cli::{EnrollArgs, OutputMode};
-use chissu_cli::commands::EnrollHandler;
+use chissu_cli::commands::{CommandHandler, EnrollHandler};
 use chissu_cli::errors::AppError;
 use chissu_cli::faces::{EnrollmentRecord, FaceEnrollmentOutcome};
 

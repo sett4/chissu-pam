@@ -7,10 +7,13 @@ use crate::errors::AppResult;
 use crate::keyring::{self, KeyringCheckSummary};
 use crate::output::render_keyring_check;
 
+type KeyringCheckFn = dyn Fn(&KeyringCommands) -> AppResult<KeyringCheckSummary> + Send + Sync;
+type KeyringRenderFn = dyn Fn(&KeyringCheckSummary, OutputMode) -> AppResult<()> + Send + Sync;
+
 pub struct KeyringHandler {
     command: KeyringCommands,
-    check: Box<dyn Fn(&KeyringCommands) -> AppResult<KeyringCheckSummary> + Send + Sync>,
-    render: Box<dyn Fn(&KeyringCheckSummary, OutputMode) -> AppResult<()> + Send + Sync>,
+    check: Box<KeyringCheckFn>,
+    render: Box<KeyringRenderFn>,
 }
 
 impl KeyringHandler {

@@ -5,6 +5,7 @@ use chissu_cli::capture::{
     CaptureHandler, CaptureOutcome, CaptureSummary, DeviceSummary, NegotiatedFormat,
 };
 use chissu_cli::cli::{CaptureArgs, OutputMode};
+use chissu_cli::commands::CommandHandler;
 use chissu_cli::config::CaptureDefaults;
 use chissu_cli::errors::AppError;
 

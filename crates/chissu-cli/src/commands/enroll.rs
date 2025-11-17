@@ -7,10 +7,13 @@ use crate::commands::CommandHandler;
 use crate::errors::AppResult;
 use crate::output::render_auto_enroll;
 
+type EnrollRunner = dyn Fn(&EnrollArgs) -> AppResult<AutoEnrollOutcome> + Send + Sync;
+type EnrollRenderer = dyn Fn(&AutoEnrollOutcome, OutputMode, bool) -> AppResult<()> + Send + Sync;
+
 pub struct EnrollHandler {
     args: EnrollArgs,
-    run: Box<dyn Fn(&EnrollArgs) -> AppResult<AutoEnrollOutcome> + Send + Sync>,
-    render: Box<dyn Fn(&AutoEnrollOutcome, OutputMode, bool) -> AppResult<()> + Send + Sync>,
+    run: Box<EnrollRunner>,
+    render: Box<EnrollRenderer>,
 }
 
 impl EnrollHandler {

@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use chissu_cli::cli::{KeyringCheckArgs, KeyringCommands, OutputMode};
-use chissu_cli::commands::KeyringHandler;
+use chissu_cli::commands::{CommandHandler, KeyringHandler};
 use chissu_cli::errors::AppError;
 use chissu_cli::keyring::KeyringCheckSummary;
 

@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::cli::{FaceRemoveArgs, FacesCommands, OutputMode};
@@ -13,35 +14,42 @@ use crate::output::{
     render_face_compare, render_face_enroll, render_face_remove, render_face_success,
 };
 
+type ResolveStoreDirFn = dyn Fn(Option<PathBuf>) -> AppResult<Option<PathBuf>> + Send + Sync;
+type FaceExtractRunner =
+    dyn Fn(&FaceExtractionConfig) -> AppResult<FaceExtractionOutcome> + Send + Sync;
+type FaceCompareRunner =
+    dyn Fn(&FaceComparisonConfig) -> AppResult<FaceComparisonOutcome> + Send + Sync;
+type FaceEnrollRunner =
+    dyn Fn(&FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome> + Send + Sync;
+type FaceRemoveRunner = dyn Fn(&FaceRemovalConfig) -> AppResult<FaceRemovalOutcome> + Send + Sync;
+type FaceExtractRenderer =
+    dyn Fn(&FaceExtractionOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+type FaceCompareRenderer =
+    dyn Fn(&FaceComparisonOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+type FaceEnrollRenderer = dyn Fn(&FaceEnrollmentOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+type FaceRemoveRenderer = dyn Fn(&FaceRemovalOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+
 pub struct FacesHandler {
     command: FacesCommands,
     deps: FacesHandlerDeps,
 }
 
 pub struct FacesHandlerDeps {
-    pub resolve_store_dir: Box<
-        dyn Fn(Option<std::path::PathBuf>) -> AppResult<Option<std::path::PathBuf>> + Send + Sync,
-    >,
-    pub extract:
-        Box<dyn Fn(&FaceExtractionConfig) -> AppResult<FaceExtractionOutcome> + Send + Sync>,
-    pub compare:
-        Box<dyn Fn(&FaceComparisonConfig) -> AppResult<FaceComparisonOutcome> + Send + Sync>,
-    pub enroll:
-        Box<dyn Fn(&FaceEnrollmentConfig) -> AppResult<FaceEnrollmentOutcome> + Send + Sync>,
-    pub remove: Box<dyn Fn(&FaceRemovalConfig) -> AppResult<FaceRemovalOutcome> + Send + Sync>,
-    pub render_extract:
-        Box<dyn Fn(&FaceExtractionOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
-    pub render_compare:
-        Box<dyn Fn(&FaceComparisonOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
-    pub render_enroll:
-        Box<dyn Fn(&FaceEnrollmentOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
-    pub render_remove: Box<dyn Fn(&FaceRemovalOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
+    pub resolve_store_dir: Box<ResolveStoreDirFn>,
+    pub extract: Box<FaceExtractRunner>,
+    pub compare: Box<FaceCompareRunner>,
+    pub enroll: Box<FaceEnrollRunner>,
+    pub remove: Box<FaceRemoveRunner>,
+    pub render_extract: Box<FaceExtractRenderer>,
+    pub render_compare: Box<FaceCompareRenderer>,
+    pub render_enroll: Box<FaceEnrollRenderer>,
+    pub render_remove: Box<FaceRemoveRenderer>,
 }
 
 impl FacesHandlerDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        resolve_store_dir: impl Fn(Option<std::path::PathBuf>) -> AppResult<Option<std::path::PathBuf>>
+        resolve_store_dir: impl Fn(Option<PathBuf>) -> AppResult<Option<PathBuf>>
             + Send
             + Sync
             + 'static,

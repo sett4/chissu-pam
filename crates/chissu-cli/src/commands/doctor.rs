@@ -7,9 +7,12 @@ use crate::doctor::{self, DoctorOutcome};
 use crate::errors::AppResult;
 use crate::output::render_doctor;
 
+type DoctorRunner = dyn Fn() -> AppResult<DoctorOutcome> + Send + Sync;
+type DoctorRenderer = dyn Fn(&DoctorOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+
 pub struct DoctorHandler {
-    run_doctor: Box<dyn Fn() -> AppResult<DoctorOutcome> + Send + Sync>,
-    render: Box<dyn Fn(&DoctorOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
+    run_doctor: Box<DoctorRunner>,
+    render: Box<DoctorRenderer>,
 }
 
 impl DoctorHandler {
@@ -25,6 +28,12 @@ impl DoctorHandler {
             run_doctor: Box::new(run_doctor),
             render: Box::new(render),
         }
+    }
+}
+
+impl Default for DoctorHandler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

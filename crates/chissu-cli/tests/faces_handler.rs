@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use chissu_cli::cli::{FaceEnrollArgs, FaceExtractArgs, FacesCommands, OutputMode};
-use chissu_cli::commands::{FacesHandler, FacesHandlerDeps};
+use chissu_cli::commands::{CommandHandler, FacesHandler, FacesHandlerDeps};
 use chissu_cli::errors::AppError;
 use chissu_cli::faces::{FaceExtractionOutcome, FaceExtractionSummary};
 

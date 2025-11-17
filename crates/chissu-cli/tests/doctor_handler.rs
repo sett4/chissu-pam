@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use chissu_cli::cli::OutputMode;
-use chissu_cli::commands::DoctorHandler;
+use chissu_cli::commands::{CommandHandler, DoctorHandler};
 use chissu_cli::doctor::{CheckStatus, DoctorCheck, DoctorOutcome};
 use chissu_cli::errors::AppError;
 

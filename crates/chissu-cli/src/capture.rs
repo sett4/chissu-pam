@@ -9,6 +9,10 @@ use crate::config::{self, CaptureDefaults};
 use crate::errors::AppResult;
 use crate::output::render_success;
 
+type CaptureDefaultsLoader = dyn Fn() -> AppResult<CaptureDefaults> + Send + Sync;
+type CaptureRunner = dyn Fn(&CaptureConfig) -> AppResult<CaptureOutcome> + Send + Sync;
+type CaptureRenderer = dyn Fn(&CaptureOutcome, OutputMode) -> AppResult<()> + Send + Sync;
+
 pub fn build_capture_config(args: &CaptureArgs, defaults: &CaptureDefaults) -> CaptureConfig {
     let device = args.device.clone().or_else(|| defaults.device.clone());
     let pixel_format = args
@@ -37,9 +41,9 @@ pub fn build_capture_config(args: &CaptureArgs, defaults: &CaptureDefaults) -> C
 
 pub struct CaptureHandler {
     args: CaptureArgs,
-    load_defaults: Box<dyn Fn() -> AppResult<CaptureDefaults> + Send + Sync>,
-    run_capture: Box<dyn Fn(&CaptureConfig) -> AppResult<CaptureOutcome> + Send + Sync>,
-    render: Box<dyn Fn(&CaptureOutcome, OutputMode) -> AppResult<()> + Send + Sync>,
+    load_defaults: Box<CaptureDefaultsLoader>,
+    run_capture: Box<CaptureRunner>,
+    render: Box<CaptureRenderer>,
 }
 
 impl CaptureHandler {
