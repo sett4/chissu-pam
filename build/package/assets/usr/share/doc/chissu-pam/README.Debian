@@ -1,0 +1,16 @@
+chissu-pam Debian README
+========================
+
+This package installs the chissu facial capture CLI (`/usr/bin/chissu-cli`)
+and PAM module (`/usr/lib/x86_64-linux-gnu/security/libpam_chissu.so`).
+
+After installation:
+  * Edit `/etc/chissu-pam/config.toml` so `video_device`, `pixel_format`,
+    `embedding_store_dir`, and model paths reflect your hardware.
+  * Ensure `/var/lib/chissu-pam/dlib-models/` is readable by the PAM service.
+    The post-install hook downloads the dlib weights unless
+    `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is set in the environment.
+  * Copy `/etc/pam.d/common-auth` (or another PAM stack entry) and add
+    `auth sufficient pam_chissu.so` after your preferred primary auth method.
+  * Run `chissu-cli doctor` to verify camera, Secret Service, and model access
+    before rolling the module out to production.
