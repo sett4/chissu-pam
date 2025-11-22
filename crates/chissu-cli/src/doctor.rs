@@ -65,6 +65,7 @@ impl Default for DoctorPaths {
                 PathBuf::from(SECONDARY_CONFIG_PATH),
             ],
             pam_module_paths: vec![
+                PathBuf::from("/usr/lib/x86_64-linux-gnu/security/libpam_chissu.so"),
                 PathBuf::from("/lib/security/libpam_chissu.so"),
                 PathBuf::from("/lib64/security/libpam_chissu.so"),
             ],

@@ -1,0 +1,4 @@
+1. [x] Create `.github/workflows/release-deb.yml` triggered on tag pushes matching `v*.*.*`; set up Rust toolchain, install required Debian packaging deps, and run `build/package-deb.sh --distro debian` and `--distro ubuntu` with `CARGO_HOME="$(pwd)/.cargo-home"`.
+2. [x] Capture the generated artifacts from `dist/` and publish them to the GitHub Release for the tag (creating it if needed) under descriptive filenames (e.g., `chissu-pam_<ver>_<distro>_amd64.deb`).
+3. [x] Document the release workflow in `README.md` (or `docs/`) so maintainers know how to cut a tagged release and verify uploaded assets.
+4. [x] Validation: `openspec validate add-release-deb-workflow --strict`, `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace` (rely on existing runner logs, note known `pam-chissu` failure if still outstanding).

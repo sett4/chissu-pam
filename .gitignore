@@ -2,3 +2,6 @@
 /captures
 /models
 /.cargo-home
+/dist
+build/package/work
+

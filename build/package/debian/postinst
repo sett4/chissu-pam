@@ -1,0 +1,50 @@
+#!/bin/sh
+set -e
+
+PKG_NAME=chissu-pam
+MODEL_DIR=/var/lib/chissu-pam/dlib-models
+EMBED_DIR=/var/lib/chissu-pam/embeddings
+LANDMARK_FILE=shape_predictor_68_face_landmarks.dat
+ENCODER_FILE=dlib_face_recognition_resnet_model_v1.dat
+LANDMARK_URL=https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
+ENCODER_URL=https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2
+SKIP_DOWNLOAD=${CHISSU_PAM_SKIP_MODEL_DOWNLOAD:-0}
+
+maybe_download() {
+    name="$1"
+    url="$2"
+    dest="$3"
+    if [ -f "$dest" ]; then
+        echo "$PKG_NAME: $name already present at $dest; skipping download"
+        return 0
+    fi
+    if [ "$SKIP_DOWNLOAD" = "1" ]; then
+        echo "$PKG_NAME: model downloads skipped via CHISSU_PAM_SKIP_MODEL_DOWNLOAD"
+        return 0
+    fi
+    tmp="$(mktemp -d)"
+    archive="$tmp/archive.bz2"
+    echo "$PKG_NAME: downloading $name"
+    if ! curl -fsSL "$url" -o "$archive"; then
+        echo "$PKG_NAME: failed to download $url" >&2
+        rm -rf "$tmp"
+        exit 1
+    fi
+    if ! bzip2 -d -c "$archive" > "$dest"; then
+        echo "$PKG_NAME: failed to decompress $archive" >&2
+        rm -rf "$tmp"
+        exit 1
+    fi
+    chmod 0644 "$dest"
+    rm -rf "$tmp"
+}
+
+case "$1" in
+    configure)
+        install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR"
+        maybe_download "$LANDMARK_FILE" "$LANDMARK_URL" "$MODEL_DIR/$LANDMARK_FILE"
+        maybe_download "$ENCODER_FILE" "$ENCODER_URL" "$MODEL_DIR/$ENCODER_FILE"
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,4 @@
+artifacts/usr/bin/chissu-cli usr/bin
+artifacts/usr/lib/x86_64-linux-gnu/security/libpam_chissu.so usr/lib/x86_64-linux-gnu/security
+artifacts/etc/chissu-pam/config.toml etc/chissu-pam
+artifacts/usr/share/doc/chissu-pam/README.Debian usr/share/doc/chissu-pam

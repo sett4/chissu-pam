@@ -12,17 +12,17 @@ cargo build --release -p pam-chissu
 cargo test -p pam-chissu
 ```
 
-The compiled module is located at `target/release/libpam_chissu.so`; copy it directly into `/lib/security/`:
+The compiled module is located at `target/release/libpam_chissu.so`; on Debian/Ubuntu amd64 copy it into `/usr/lib/x86_64-linux-gnu/security/` (fallback to `/lib/security/` on distributions without multiarch PAM directories):
 
 ```bash
-sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
+sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
 ```
 
 ## Installation overview
 
-1. Copy the shared library into your PAM module directory (usually `/lib/security/` on Debian/Ubuntu):
+1. Copy the shared library into your PAM module directory (Debian/Ubuntu amd64: `/usr/lib/x86_64-linux-gnu/security/`; other distros may still use `/lib/security/`):
    ```bash
-   sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
+   sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
    ```
 2. Configure the service stack (example for `login`):
    ```pam

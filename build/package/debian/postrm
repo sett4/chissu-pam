@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+CONFIG_DIR=/etc/chissu-pam
+MODEL_DIR=/var/lib/chissu-pam/dlib-models
+EMBED_DIR=/var/lib/chissu-pam/embeddings
+PURGE_MODELS=${CHISSU_PAM_PURGE_MODELS:-0}
+
+case "$1" in
+    purge)
+        rm -f "$CONFIG_DIR/config.toml"
+        if [ "$PURGE_MODELS" = "1" ]; then
+            echo "chissu-pam: removing downloaded dlib models"
+            rm -f "$MODEL_DIR/shape_predictor_68_face_landmarks.dat"
+            rm -f "$MODEL_DIR/dlib_face_recognition_resnet_model_v1.dat"
+        fi
+        if [ -d "$EMBED_DIR" ]; then
+            if [ -z "$(find "$EMBED_DIR" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+                rmdir "$EMBED_DIR" 2>/dev/null || true
+            fi
+        fi
+        ;;
+esac
+
+exit 0

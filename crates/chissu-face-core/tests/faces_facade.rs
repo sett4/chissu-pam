@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+use chissu_face_core::errors::AppResult;
 use chissu_face_core::faces::enrollment::{
     run_face_enrollment_with, run_face_removal_with, FaceEnrollmentConfig, FaceRemovalConfig,
     KeyProvider,
 };
 use chissu_face_core::faces::extractor::{BoundingBox, FaceEmbeddingRecord, FaceExtractionSummary};
 use chissu_face_core::faces::store::{EnrolledEmbedding, FaceStore, StoreDirResolver};
-use chissu_face_core::errors::AppResult;
 use chissu_face_core::secret_service::{EmbeddingKey, EmbeddingKeyStatus};
 use tempfile::TempDir;
 

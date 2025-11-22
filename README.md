@@ -50,9 +50,40 @@ The CLI and PAM module need the official dlib weights:
 - `shape_predictor_68_face_landmarks.dat`
 - `dlib_face_recognition_resnet_model_v1.dat`
 
-Download them from https://dlib.net/files/ once, then store them in a shared location (for example `/var/lib/chissu-pam/dlib-models`). Point `chissu-cli` at the files via CLI flags or entries in `config.toml`.
+Download them from https://dlib.net/files/ once, then store them in a shared location (for example `/var/lib/chissu-pam/dllib-models`). Point `chissu-cli` at the files via CLI flags or entries in `config.toml`. When you install the Debian/Ubuntu packages described below, the `postinst` hook handles these downloads automatically unless you export `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` for offline deployments.
 
 ### Installation
+
+#### Debian/Ubuntu packages (recommended)
+
+1. **Build the package** (requires `debhelper`, `dpkg-dev`, and `curl`):
+
+   ```bash
+   build/package-deb.sh --distro debian   # or --distro ubuntu
+   ```
+
+   Pass `--version` to override the detected workspace version or `--arch` for non-`amd64` builds. Artifacts land in `dist/chissu-pam_<version>_<distro>_amd64.deb`.
+
+2. **Install the package**:
+
+   ```bash
+   sudo dpkg -i dist/chissu-pam_0.3.0_debian_amd64.deb
+   ```
+
+   The CLI binary, PAM module, default config, and doc snippets are placed under the standard system paths.
+
+3. **Automatic dlib weights**: during installation the `postinst` script downloads both dlib model files into `/var/lib/chissu-pam/dlib-models`. Skip downloads (for offline mirrors or air-gapped hosts) by setting `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` before running `dpkg -i`. When purging the package, set `CHISSU_PAM_PURGE_MODELS=1` to remove the downloaded weights as well.
+
+4. **Wire PAM + config**: edit `/etc/chissu-pam/config.toml` and `/etc/pam.d/<service>` as described later in this document. The packaged config template mirrors the defaults below.
+
+#### Automated releases
+
+- Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` (for example `git tag v0.3.0 && git push origin v0.3.0`).
+- The `Release Debian Packages` workflow builds both Debian and Ubuntu `.deb` files via `build/package-deb.sh`, using the numeric portion of the tag as the package version.
+- When the workflow finishes, GitHub Releases contains `chissu-pam_<version>_debian_amd64.deb` and `chissu-pam_<version>_ubuntu_amd64.deb` assets attached to that tag. Release notes are auto-generated; edit them manually if more detail is needed.
+- If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
+
+#### Manual install from source
 
 1. **Build release artifacts** (the workspace expects `CARGO_HOME` to be inside the repo):
 
@@ -78,11 +109,15 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
    sudo bunzip2 /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2 /var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
    ```
 
+   (Skip this step when installing via the `.deb` packages—the `postinst` script performs the same download.)
+
 4. **Install the PAM module**:
 
    ```bash
-   sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so
+   sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
    ```
+
+   (Use `/lib/security` on distributions that do not provide the multiarch PAM directory.)
 
 5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `embedding_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
 
@@ -91,7 +126,7 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 7. **Wire PAM** by editing the relevant `/etc/pam.d/<service>` entry:
 
    ```text
-   auth    sufficient      /usr/lib/security/libpam_chissu.so
+   auth    sufficient      /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
    ```
 
    Keep your existing `auth` stack intact—this module augments, not replaces, other factors.
@@ -224,7 +259,7 @@ sudo \
 The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Linux users by comparing a live camera capture with embeddings enrolled via `faces enroll`.
 
 - Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
-- Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /lib/security/libpam_chissu.so`) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
+- Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so` on Debian/Ubuntu) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
 - Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
   - `similarity_threshold = 0.9`
   - `capture_timeout_secs = 5`
