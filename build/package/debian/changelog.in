@@ -1,0 +1,5 @@
+chissu-pam (__DEB_VERSION__) __DISTRO__; urgency=medium
+
+  * Automated package build for __DISTRO__ (__VERSION__).
+
+ -- __MAINTAINER__  __DATE__

@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	@echo "build/package-deb.sh handles cargo configuration"
+
+override_dh_auto_build:
+	@echo "Skipping cargo build inside debhelper; using staged artifacts"
+
+override_dh_auto_test:
+	@echo "Tests executed outside dpkg-buildpackage"

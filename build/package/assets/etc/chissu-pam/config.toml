@@ -1,0 +1,14 @@
+# Default configuration installed by the Debian/Ubuntu packages.
+# Adjust the values to match your camera device, pixel format, and
+# embedding/model storage paths before enabling the PAM module.
+
+video_device = "/dev/video0"
+pixel_format = "Y16"
+warmup_frames = 4
+embedding_store_dir = "/var/lib/chissu-pam/embeddings"
+landmark_model = "/var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat"
+encoder_model = "/var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat"
+similarity_threshold = 0.9
+capture_timeout_secs = 5
+frame_interval_millis = 500
+require_secret_service = false
