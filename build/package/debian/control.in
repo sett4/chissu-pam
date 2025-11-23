@@ -2,14 +2,14 @@ Source: chissu-pam
 Section: admin
 Priority: optional
 Maintainer: __MAINTAINER__
-Build-Depends: debhelper-compat (= 13)
+Build-Depends: debhelper-compat (= 13), libdlib-dev, libopenblas-dev, liblapack-dev, libgtk-3-dev, libudev-dev
 Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://github.com/sett/chissu-pam
 
 Package: chissu-pam
 Architecture: __ARCH__
-Depends: ${shlibs:Depends}, ${misc:Depends}, libdlib-dev, libopenblas-dev, liblapack-dev, libgtk-3-dev, libudev-dev, curl, bzip2, ca-certificates
+Depends: ${shlibs:Depends}, ${misc:Depends}, curl, bzip2, ca-certificates
 Description: Facial capture CLI and PAM module powered by V4L2 + dlib
  Provides the `chissu-cli` capture/enrollment helper plus the `pam_chissu`
  authentication module. Packages manage `/etc/chissu-pam/config.toml`, stage
