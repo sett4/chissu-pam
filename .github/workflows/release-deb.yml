@@ -30,7 +30,8 @@ jobs:
             libdlib-dev libopenblas-dev liblapack-dev \
             libpam-dev \
             libdbus-1-dev libgtk-3-dev libudev-dev \
-            debhelper dpkg-dev devscripts curl bzip2
+            debhelper dpkg-dev devscripts curl bzip2 \
+            rpm rpm2cpio createrepo-c
 
       - name: Build Debian and Ubuntu packages
         env:
@@ -43,7 +44,15 @@ jobs:
             exit 1
           fi
           ./build/package-deb.sh --distro debian --version "$VERSION"
-          ./build/package-deb.sh --distro ubuntu --version "$VERSION"
+          ./build/package-deb.sh --distro ubuntu --version "$VERSION" --skip-build
+
+      - name: Build RPM package
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          CARGO_HOME: ${{ github.workspace }}/.cargo-home
+        run: |
+          VERSION="${TAG_NAME#v}"
+          ./build/package-rpm.sh --distro fedora --version "$VERSION" --skip-build
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
@@ -52,3 +61,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/chissu-pam_*_amd64.deb
+            dist/chissu-pam_*.rpm

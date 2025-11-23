@@ -1,0 +1,15 @@
+chissu-pam RPM README
+=====================
+
+This package installs the chissu facial capture CLI (`/usr/bin/chissu-cli`)
+and PAM module (`/usr/lib64/security/libpam_chissu.so`).
+
+Post-install checklist:
+  * Edit `/etc/chissu-pam/config.toml` to match your camera and model paths.
+  * Ensure `/var/lib/chissu-pam/dlib-models/` is writable by the PAM service.
+    The `%post` script downloads the dlib weights unless
+    `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is set.
+  * Add `auth sufficient pam_chissu.so` to an appropriate entry under
+    `/etc/pam.d/` once you've verified `chissu-cli doctor` succeeds.
+  * Rerun `dnf install ./chissu-pam-<version>.rpm` when upgrading; `%postun`
+    keeps your dlib weights unless `CHISSU_PAM_PURGE_MODELS=1` is exported.
