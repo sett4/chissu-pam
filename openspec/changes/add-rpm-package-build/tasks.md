@@ -1,0 +1,5 @@
+1. [x] Add an RPM packaging helper (e.g., `build/package-rpm.sh`) that builds release binaries with `CARGO_HOME="$(pwd)/.cargo-home"`, stages files under `build/package/rpm`, renders spec `%install/%post` scripts, runs `rpmbuild -bb`, and copies artifacts into `dist/`.
+2. [x] Ensure RPM `%post` installs download the dlib weights during package install (skipping when already present or when an environment toggle skips downloads) so package creation stays lightweight.
+3. [x] Update documentation (README/docs) with RPM build/install instructions plus environment flags for skipping downloads; mention this proposal targets branch `t/add-rpm-package-build`.
+4. [x] Modify the GitHub Actions release workflow to build the RPM package for every `v<MAJOR>.<MINOR>.<PATCH>` tag and upload the resulting `.rpm` files to the corresponding GitHub Release alongside the `.deb` assets.
+5. [x] Validation: `openspec validate add-rpm-package-build --strict`, `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --workspace`, and provide RPM build logs before requesting review.

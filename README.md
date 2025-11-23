@@ -80,8 +80,45 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 
 - Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` (for example `git tag v0.3.0 && git push origin v0.3.0`).
 - The `Release Debian Packages` workflow builds both Debian and Ubuntu `.deb` files via `build/package-deb.sh`, using the numeric portion of the tag as the package version.
-- When the workflow finishes, GitHub Releases contains `chissu-pam_<version>_debian_amd64.deb` and `chissu-pam_<version>_ubuntu_amd64.deb` assets attached to that tag. Release notes are auto-generated; edit them manually if more detail is needed.
+- When the workflow finishes, GitHub Releases contains `chissu-pam_<version>_debian_amd64.deb`, `chissu-pam_<version>_ubuntu_amd64.deb`, and `chissu-pam_<version>_<distro>_x86_64.rpm` assets attached to that tag. Release notes are auto-generated; edit them manually if more detail is needed.
 - If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
+
+#### RPM packages (Fedora/RHEL)
+
+The RPM tooling currently lives on branch `t/add-rpm-package-build` until it is merged back to `main`.
+
+1. **Build the package** (requires `rpm-build`, `createrepo-c`, and the same native deps as the Debian flow):
+
+   ```bash
+   build/package-rpm.sh --distro fedora   # add --version <semver> to override
+   ```
+
+   Add `--skip-build` if you've already produced release binaries via another step. Artifacts land in `dist/chissu-pam_<version>_<distro>_x86_64.rpm`.
+
+2. **Install the package**:
+
+   ```bash
+   sudo dnf install ./dist/chissu-pam_0.3.0_fedora_x86_64.rpm
+   ```
+
+3. **Automatic dlib weights**: `%post` mirrors the Debian behaviour—models are downloaded into `/var/lib/chissu-pam/dlib-models` unless `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is exported before running `dnf install`. Set `CHISSU_PAM_PURGE_MODELS=1` before uninstalling to remove the downloaded weights.
+
+4. **Configure PAM** the same way as the Debian instructions (edit `/etc/chissu-pam/config.toml`, update `/etc/pam.d/<service>`, and run `chissu-cli doctor`).
+
+##### Build RPMs via Docker (Ubuntu hosts)
+
+Use the provided Fedora builder image when `rpmbuild` (or the necessary headers) are missing locally:
+
+```bash
+docker build -t chissu-rpm -f build/package/rpm/Dockerfile .
+docker run --rm -it \
+  -v "$PWD":/workspace \
+  -w /workspace \
+  chissu-rpm \
+  ./build/package-rpm.sh --distro fedora --version 0.3.0
+```
+
+The container writes artifacts back into `dist/` inside your working tree. Pass `--skip-build` if you already have release binaries before invoking the container.
 
 #### Manual install from source
 
