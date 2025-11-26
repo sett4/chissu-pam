@@ -108,7 +108,8 @@ install_prereqs_rocky() {
 install_prereqs_arch() {
   log "Installing dependencies via pacman..."
   run pacman -Sy --noconfirm
-  run pacman -S --needed --noconfirm base-devel pkgconf dlib openblas lapack gtk3 systemd curl bzip2
+  run pacman -S --needed --noconfirm base-devel pkgconf openblas lapack gtk3 systemd curl bzip2
+  run yay -S --noconfirm dlib
 }
 
 ensure_dirs() {
