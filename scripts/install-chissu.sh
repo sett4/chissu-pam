@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Chissu installer for Ubuntu/Debian and Rocky Linux.
+# Chissu installer for Ubuntu/Debian, Rocky Linux, and Arch Linux.
 # Deploys chissu-cli, libpam_chissu.so, config, and dlib model assets.
 
 ARTIFACT_DIR=${ARTIFACT_DIR:-target/release}
@@ -58,6 +58,10 @@ parse_args() {
 }
 
 require_root() {
+  if [[ $DRY_RUN -eq 1 ]]; then
+    warn "Running in dry-run without root; commands will not execute"
+    return
+  fi
   if [[ $(id -u) -ne 0 ]]; then
     err "Run as root (sudo) to install packages and write to system paths"
   fi
@@ -65,19 +69,23 @@ require_root() {
 
 os_flavor=""
 detect_os() {
-  if [[ ! -f /etc/os-release ]]; then
-    err "/etc/os-release missing; cannot detect OS"
+  if [[ ! -f "$OS_RELEASE" ]]; then
+    err "$OS_RELEASE missing; cannot detect OS"
   fi
-  source /etc/os-release
+  # shellcheck source=/dev/null
+  source "$OS_RELEASE"
   case "${ID:-}" in
     ubuntu|debian) os_flavor="debian" ;;
     rocky) os_flavor="rocky" ;;
+    arch) os_flavor="arch" ;;
     *) ;;
   esac
   if [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ debian ]]; then
     os_flavor="debian"
   elif [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ rhel ]]; then
     os_flavor="rocky"
+  elif [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ arch ]]; then
+    os_flavor="arch"
   fi
   [[ -n "$os_flavor" ]] || err "Unsupported distro (ID=${ID:-unknown})"
 }
@@ -94,6 +102,12 @@ install_prereqs_rocky() {
   run dnf config-manager --set-enabled crb || run dnf config-manager --set-enabled powertools || true
   run dnf groupinstall -y "Development Tools"
   run dnf install -y dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconfig curl bzip2
+}
+
+install_prereqs_arch() {
+  log "Installing dependencies via pacman..."
+  run pacman -Sy --noconfirm
+  run pacman -S --needed --noconfirm base-devel pkgconf dlib openblas lapack gtk3 systemd curl bzip2
 }
 
 ensure_dirs() {
@@ -215,6 +229,7 @@ main() {
   case "$os_flavor" in
     debian) install_prereqs_debian ;;
     rocky) install_prereqs_rocky ;;
+    arch) install_prereqs_arch ;;
     *) err "Unsupported distro" ;;
   esac
 
@@ -227,3 +242,4 @@ main() {
 }
 
 main "$@"
+OS_RELEASE=${OS_RELEASE:-/etc/os-release}

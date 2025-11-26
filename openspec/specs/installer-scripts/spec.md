@@ -5,7 +5,7 @@ TBD - created by archiving change add-linux-install-scripts. Update Purpose afte
 ## Requirements
 ### Requirement: Distro-Aware Installer Entry Point
 
-The project SHALL provide an installer script that supports Ubuntu/Debian and Rocky Linux (8/9) by selecting the appropriate package manager and prerequisite set before deploying artifacts.
+The project SHALL provide an installer script that supports Ubuntu/Debian, Rocky Linux (8/9), and Arch Linux by selecting the appropriate package manager and prerequisite set before deploying artifacts.
 
 #### Scenario: Ubuntu/Debian prerequisites installed via apt
 
@@ -18,6 +18,12 @@ The project SHALL provide an installer script that supports Ubuntu/Debian and Ro
 - **WHEN** `/etc/os-release` reports `ID=rocky` or `ID_LIKE=rhel`
 - **THEN** the installer enables EPEL and CRB/PowerTools repositories, uses `dnf` to install packages providing dlib, OpenBLAS/LAPACK, GTK3, udev/systemd headers, compiler toolchain, and `pkgconfig`
 - **AND** it exits non-zero with guidance when the distro is unsupported or repositories are missing.
+
+#### Scenario: Arch prerequisites installed via pacman
+
+- **WHEN** `/etc/os-release` reports `ID=arch` or `ID_LIKE` includes `arch`
+- **THEN** the installer uses `pacman -S --needed` to install packages providing dlib, OpenBLAS/LAPACK, GTK3 headers, udev/systemd headers, compiler toolchain (`base-devel`), `pkgconf`, `curl`, and `bzip2`
+- **AND** it exits non-zero with a clear message if pacman is unavailable, the package set cannot be resolved, or the distro detection fails.
 
 ### Requirement: Correct Artifact Placement
 
