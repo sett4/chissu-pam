@@ -187,7 +187,7 @@ The container writes artifacts back into `dist/` inside your working tree. Pass 
     sudo echo test chissu-pam
     ```
 
-#### Automated installer (Ubuntu/Rocky)
+#### Automated installer (Ubuntu/Rocky/Arch)
 
 If you already have release artifacts (or a downloaded bundle) you can let the repo script place files and dependencies for you:
 
@@ -198,7 +198,8 @@ sudo scripts/install-chissu.sh \
   --store-dir /var/lib/chissu-pam/models
 ```
 
-- Auto-detects Ubuntu/Debian vs Rocky Linux, installs required packages (apt or dnf + EPEL/CRB), and puts the PAM module in `/lib/security` (Debian/Ubuntu) or `/usr/lib64/security` (Rocky, with `restorecon` when available).
+- Auto-detects Ubuntu/Debian vs Rocky Linux vs Arch Linux, installs required packages (`apt`, `dnf` + EPEL/CRB, or `pacman`), and puts the PAM module in `/lib/security` (Debian/Ubuntu/Arch) or `/usr/lib64/security` (Rocky, with `restorecon` when available).
+- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `dlib`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, and `bzip2`.
 - Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{models,dlib-models}` exist. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
 - Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
 - Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
