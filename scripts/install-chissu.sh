@@ -8,6 +8,7 @@ ARTIFACT_DIR=${ARTIFACT_DIR:-target/release}
 MODEL_DIR=${MODEL_DIR:-/var/lib/chissu-pam/dlib-models}
 STORE_DIR=${STORE_DIR:-/var/lib/chissu-pam/models}
 CONFIG_PATH=${CONFIG_PATH:-/etc/chissu-pam/config.toml}
+OS_RELEASE=${OS_RELEASE:-/etc/os-release}
 DRY_RUN=${DRY_RUN:-0}
 FORCE=${FORCE:-0}
 SKIP_DOWNLOAD=${SKIP_DOWNLOAD:-0}
