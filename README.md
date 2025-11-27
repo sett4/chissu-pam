@@ -199,7 +199,7 @@ sudo scripts/install-chissu.sh \
 ```
 
 - Auto-detects Ubuntu/Debian vs Rocky Linux vs Arch Linux, installs required packages (`apt`, `dnf` + EPEL/CRB, or `pacman`), and puts the PAM module in `/lib/security` (Debian/Ubuntu/Arch) or `/usr/lib64/security` (Rocky, with `restorecon` when available).
-- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `dlib`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, and `bzip2`.
+- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, `rust`, and `bzip2`. dlib is in AUR, so `yay -S dlib`.
 - Wires PAM automatically per distro with a single `auth sufficient libpam_chissu.so` entry placed **before** `pam_unix.so`: Debian/Ubuntu via `pam-auth-update` snippet `/usr/share/pam-configs/chissu`, RHEL/Fedora/Rocky via an `authselect` custom profile, Arch by including a `/etc/pam.d/chissu` stack from `system-local-login`/`login`.
 - Supports rollbacks with `--uninstall` (removes only the PAM wiring using distro-native tools) and `--dry-run` to preview all changes. Backups land in `/var/lib/chissu-pam/install/`.
 - Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{models,dlib-models}` exist. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
