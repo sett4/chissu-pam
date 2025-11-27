@@ -199,7 +199,7 @@ sudo scripts/install-chissu.sh \
 ```
 
 - Auto-detects Ubuntu/Debian vs Rocky Linux vs Arch Linux, installs required packages (`apt`, `dnf` + EPEL/CRB, or `pacman`), and puts the PAM module in `/lib/security` (Debian/Ubuntu/Arch) or `/usr/lib64/security` (Rocky, with `restorecon` when available).
-- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `dlib`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, and `bzip2`.
+- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, `rust`, and `bzip2`. dlib is in AUR, so `yay -S dlib`.
 - Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{models,dlib-models}` exist. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
 - Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
 - Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
