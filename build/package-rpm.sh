@@ -19,12 +19,21 @@ USAGE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LIB_PATH="$REPO_ROOT/scripts/lib/install_common.sh"
 DISTRO=""
 VERSION=""
 RELEASE="1"
 ARCH="x86_64"
 SKIP_BUILD=0
-BUILD_DEPS=(dbus-devel clang-libs gcc-c++ rust cargo rpm-build dlib-devel pam-devel)
+if [[ ! -f "$LIB_PATH" ]]; then
+  echo "Missing shared installer library at $LIB_PATH" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$LIB_PATH"
+
+BUILD_DEPS=("${ROCKY_BUILD_PREREQS[@]}" rpm-build rust cargo dbus-devel clang-libs pam-devel)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -116,6 +125,8 @@ else
   log "Skipping cargo build (per --skip-build)"
 fi
 
+"$REPO_ROOT/scripts/render-install-assets.sh"
+
 BIN_SRC="$REPO_ROOT/target/release/chissu-cli"
 PAM_SRC="$REPO_ROOT/target/release/libpam_chissu.so"
 if [[ ! -f "$BIN_SRC" || ! -f "$PAM_SRC" ]]; then
@@ -143,12 +154,14 @@ mkdir -p "$ARTIFACT_DIR/usr/bin" \
          "$ARTIFACT_DIR/usr/share/doc/chissu-pam" \
          "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models" \
          "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings" \
-         "$ARTIFACT_DIR/var/lib/chissu-pam/install"
+         "$ARTIFACT_DIR/var/lib/chissu-pam/install" \
+         "$ARTIFACT_DIR/usr/share/chissu-pam"
 
 cp "$BIN_SRC" "$ARTIFACT_DIR/usr/bin/chissu-cli"
 cp "$PAM_SRC" "$ARTIFACT_DIR/usr/lib64/security/libpam_chissu.so"
 cp "$REPO_ROOT/build/package/assets/etc/chissu-pam/config.toml" "$ARTIFACT_DIR/etc/chissu-pam/config.toml"
 cp "$REPO_ROOT/build/package/assets/usr/share/doc/chissu-pam/README.RPM" "$ARTIFACT_DIR/usr/share/doc/chissu-pam/README.RPM"
+cp "$REPO_ROOT/build/package/assets/usr/share/chissu-pam/install-common.sh" "$ARTIFACT_DIR/usr/share/chissu-pam/install-common.sh"
 touch "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/install/.keep"
 cp "$REPO_ROOT/LICENSE" "$STAGING_ROOT/LICENSE"
 

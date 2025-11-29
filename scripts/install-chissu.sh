@@ -3,13 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname "$0")" && pwd -P)
 
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/install_common.sh"
+
 # Chissu installer for Ubuntu/Debian, Rocky Linux, and Arch Linux.
 # Deploys chissu-cli, libpam_chissu.so, config, and dlib model assets.
 
 ARTIFACT_DIR=${ARTIFACT_DIR:-target/release}
-MODEL_DIR=${MODEL_DIR:-/var/lib/chissu-pam/dlib-models}
-STORE_DIR=${STORE_DIR:-/var/lib/chissu-pam/models}
-CONFIG_PATH=${CONFIG_PATH:-/etc/chissu-pam/config.toml}
+MODEL_DIR=${MODEL_DIR:-$INSTALL_COMMON_MODEL_DIR}
+STORE_DIR=${STORE_DIR:-$INSTALL_COMMON_EMBED_DIR}
+CONFIG_PATH=${CONFIG_PATH:-$INSTALL_COMMON_CONFIG_PATH}
 OS_RELEASE=${OS_RELEASE:-/etc/os-release}
 DRY_RUN=${DRY_RUN:-0}
 FORCE=${FORCE:-0}
@@ -110,7 +113,7 @@ detect_os() {
 install_prereqs_debian() {
   log "Installing dependencies via apt..."
   run apt-get update
-  run apt-get install -y build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libudev-dev curl bzip2
+  run apt-get install -y "${DEBIAN_BUILD_PREREQS[@]}"
 }
 
 install_prereqs_rocky() {
@@ -118,14 +121,18 @@ install_prereqs_rocky() {
   run dnf install -y epel-release
   run dnf config-manager --set-enabled crb || run dnf config-manager --set-enabled powertools || true
   run dnf groupinstall -y "Development Tools"
-  run dnf install -y dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconfig curl bzip2
+  run dnf install -y "${ROCKY_BUILD_PREREQS[@]}"
 }
 
 install_prereqs_arch() {
   log "Installing dependencies via pacman..."
   run pacman -Sy --noconfirm
-  run pacman -S --needed --noconfirm base-devel pkgconf openblas lapack gtk3 systemd curl bzip2
-  run sudo -u $SUDO_USER yay -S --noconfirm dlib
+  run pacman -S --needed --noconfirm "${ARCH_BUILD_PREREQS[@]}"
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    run sudo -u "$SUDO_USER" yay -S --noconfirm dlib
+  else
+    warn "SUDO_USER not set; skipping yay dlib install"
+  fi
 }
 
 ensure_dirs() {
@@ -134,30 +141,9 @@ ensure_dirs() {
       log "Creating directory $dir"
       run mkdir -p "$dir"
     fi
-    if [[ "$dir" == "$STORE_DIR" ]]; then
-      run chmod 0777 "$dir"
-    else
-      run chmod 0755 "$dir"
-    fi
+    run chmod 0755 "$dir"
     run chown root:root "$dir"
   done
-}
-
-default_config() {
-  cat <<EOF
-# chissu-pam default configuration
-similarity_threshold = 0.9
-capture_timeout_secs = 5
-frame_interval_millis = 500
-video_device = "/dev/video2"
-pixel_format = "GREY"
-warmup_frames = 4
-jitters = 1
-embedding_store_dir = "$STORE_DIR"
-landmark_model = "$MODEL_DIR/shape_predictor_68_face_landmarks.dat"
-encoder_model = "$MODEL_DIR/dlib_face_recognition_resnet_model_v1.dat"
-require_secret_service = true
-EOF
 }
 
 backup_if_needed() {
@@ -178,7 +164,8 @@ backup_if_needed() {
 backup_to_state() {
   local target=$1
   [[ -f "$target" ]] || return 0
-  local dest="$STATE_DIR/$(basename "$target").$(timestamp).bak"
+  local dest
+  dest="$STATE_DIR/$(basename "$target").$(timestamp).bak"
   if [[ $DRY_RUN -eq 1 ]]; then
     log "[dry-run] backup $target -> $dest"
     return 0
@@ -190,9 +177,9 @@ install_config() {
   if backup_if_needed "$CONFIG_PATH"; then
     log "Writing default config to $CONFIG_PATH"
     if [[ $DRY_RUN -eq 1 ]]; then
-      default_config | sed 's/^/[dry-run config] /'
+      render_default_config "$STORE_DIR" "$MODEL_DIR" | sed 's/^/[dry-run config] /'
     else
-      default_config > "$CONFIG_PATH"
+      render_default_config "$STORE_DIR" "$MODEL_DIR" > "$CONFIG_PATH"
       run chmod 0644 "$CONFIG_PATH"
       run chown root:root "$CONFIG_PATH"
     fi
@@ -245,8 +232,8 @@ fetch_model() {
 }
 
 provision_models() {
-  fetch_model "shape_predictor_68_face_landmarks.dat.bz2" "https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
-  fetch_model "dlib_face_recognition_resnet_model_v1.dat.bz2" "https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2"
+  fetch_model "$INSTALL_COMMON_LANDMARK_FILE.bz2" "$INSTALL_COMMON_LANDMARK_URL"
+  fetch_model "$INSTALL_COMMON_ENCODER_FILE.bz2" "$INSTALL_COMMON_ENCODER_URL"
 }
 
 insert_before_first_match() {

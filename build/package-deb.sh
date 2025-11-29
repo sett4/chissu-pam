@@ -22,6 +22,7 @@ USAGE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LIB_PATH="$REPO_ROOT/scripts/lib/install_common.sh"
 PKG_NAME="chissu-pam"
 PAM_DEST_REL="usr/lib/x86_64-linux-gnu/security"
 DISTRO=""
@@ -29,7 +30,15 @@ VERSION=""
 ARCH="amd64"
 REVISION="1"
 SKIP_BUILD=0
-BUILD_DEPS=(build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libudev-dev curl bzip2 rustc cargo)
+if [[ ! -f "$LIB_PATH" ]]; then
+  echo "Missing shared installer library at $LIB_PATH" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$LIB_PATH"
+
+BUILD_DEPS=("${DEBIAN_BUILD_PREREQS[@]}")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -131,6 +140,8 @@ else
   log "Skipping cargo build (per --skip-build)"
 fi
 
+"$REPO_ROOT/scripts/render-install-assets.sh"
+
 rm -rf "$WORK_ROOT"
 mkdir -p "$DEBIAN_DIR" "$ARTIFACT_DIR" "$DIST_DIR"
 
@@ -184,11 +195,13 @@ mkdir -p "$ARTIFACT_DIR/usr/bin" \
          "$ARTIFACT_DIR/$PAM_DEST_REL" \
          "$ARTIFACT_DIR/etc/chissu-pam" \
          "$ARTIFACT_DIR/usr/share/doc/chissu-pam" \
-         "$ARTIFACT_DIR/usr/share/pam-configs"
+         "$ARTIFACT_DIR/usr/share/pam-configs" \
+         "$ARTIFACT_DIR/usr/share/chissu-pam"
 
 cp "$BIN_SRC" "$ARTIFACT_DIR/usr/bin/chissu-cli"
 cp "$PAM_SRC" "$ARTIFACT_DIR/$PAM_DEST_REL/libpam_chissu.so"
 cp "$REPO_ROOT/build/package/assets/etc/chissu-pam/config.toml" "$ARTIFACT_DIR/etc/chissu-pam/config.toml"
+cp "$REPO_ROOT/build/package/assets/usr/share/chissu-pam/install-common.sh" "$ARTIFACT_DIR/usr/share/chissu-pam/install-common.sh"
 cp "$REPO_ROOT/build/package/assets/usr/share/doc/chissu-pam/README.Debian" "$ARTIFACT_DIR/usr/share/doc/chissu-pam/README.Debian"
 cp "$REPO_ROOT/build/package/assets/usr/share/pam-configs/chissu" "$ARTIFACT_DIR/usr/share/pam-configs/chissu"
 
