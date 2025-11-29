@@ -24,6 +24,11 @@ VERSION=""
 RELEASE="1"
 ARCH="x86_64"
 SKIP_BUILD=0
+BUILD_DEPS=(dbus-devel clang-libs gcc-c++ rust cargo rpm-build dlib-devel pam-devel)
+SUDO_CMD=""
+if [[ $EUID -ne 0 ]]; then
+  SUDO_CMD="sudo"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -84,7 +89,28 @@ log() {
   echo "[package-rpm] $*"
 }
 
+install_build_deps() {
+  local installer=""
+  if command -v dnf >/dev/null 2>&1; then
+    installer="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    installer="yum"
+  fi
+
+  if [[ -z "$installer" ]]; then
+    log "No dnf/yum found; please install build deps manually: ${BUILD_DEPS[*]}"
+    return
+  fi
+
+  log "Installing build prerequisites via $installer: ${BUILD_DEPS[*]}"
+  if ! $SUDO_CMD $installer install -y "${BUILD_DEPS[@]}"; then
+    echo "Failed to install build prerequisites" >&2
+    exit 1
+  fi
+}
+
 if [[ $SKIP_BUILD -eq 0 ]]; then
+  install_build_deps
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \

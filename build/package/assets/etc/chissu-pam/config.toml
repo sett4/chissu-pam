@@ -11,4 +11,4 @@ encoder_model = "/var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_mo
 similarity_threshold = 0.9
 capture_timeout_secs = 5
 frame_interval_millis = 500
-require_secret_service = false
+require_secret_service = true
