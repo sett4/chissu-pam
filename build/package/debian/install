@@ -3,3 +3,4 @@ artifacts/usr/lib/x86_64-linux-gnu/security/libpam_chissu.so usr/lib/x86_64-linu
 artifacts/etc/chissu-pam/config.toml etc/chissu-pam
 artifacts/usr/share/doc/chissu-pam/README.Debian usr/share/doc/chissu-pam
 artifacts/usr/share/pam-configs/chissu usr/share/pam-configs
+artifacts/usr/share/chissu-pam/install-common.sh usr/share/chissu-pam

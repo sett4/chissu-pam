@@ -3,13 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname "$0")" && pwd -P)
 
-# Chissu installer for Ubuntu/Debian, Rocky Linux, and Arch Linux.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/install_common.sh"
+
+# Chissu installer for Ubuntu/Debian, Fedora/Rocky (RPM), and Arch Linux.
 # Deploys chissu-cli, libpam_chissu.so, config, and dlib model assets.
 
 ARTIFACT_DIR=${ARTIFACT_DIR:-target/release}
-MODEL_DIR=${MODEL_DIR:-/var/lib/chissu-pam/dlib-models}
-STORE_DIR=${STORE_DIR:-/var/lib/chissu-pam/models}
-CONFIG_PATH=${CONFIG_PATH:-/etc/chissu-pam/config.toml}
+MODEL_DIR=${MODEL_DIR:-$INSTALL_COMMON_MODEL_DIR}
+STORE_DIR=${STORE_DIR:-$INSTALL_COMMON_EMBED_DIR}
+CONFIG_PATH=${CONFIG_PATH:-$INSTALL_COMMON_CONFIG_PATH}
 OS_RELEASE=${OS_RELEASE:-/etc/os-release}
 DRY_RUN=${DRY_RUN:-0}
 FORCE=${FORCE:-0}
@@ -42,6 +45,9 @@ Options:
   --force                 Overwrite existing binaries/configs (with backup) when present
   --skip-model-download   Skip downloading dlib model archives
   -h, --help              Show this help
+
+Notes:
+- The installer no longer installs prerequisite packages automatically; it will list missing packages and the exact command to run.
 
 Environment overrides: ARTIFACT_DIR, MODEL_DIR, STORE_DIR, CONFIG_PATH, DRY_RUN, FORCE, SKIP_DOWNLOAD
 USAGE
@@ -93,12 +99,15 @@ detect_os() {
   source "$OS_RELEASE"
   case "${ID:-}" in
     ubuntu|debian) os_flavor="debian" ;;
+    fedora) os_flavor="fedora" ;;
     rocky) os_flavor="rocky" ;;
     arch) os_flavor="arch" ;;
     *) ;;
   esac
   if [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ debian ]]; then
     os_flavor="debian"
+  elif [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ fedora ]]; then
+    os_flavor="fedora"
   elif [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ rhel ]]; then
     os_flavor="rocky"
   elif [[ -z "$os_flavor" && "${ID_LIKE:-}" =~ arch ]]; then
@@ -107,25 +116,71 @@ detect_os() {
   [[ -n "$os_flavor" ]] || err "Unsupported distro (ID=${ID:-unknown})"
 }
 
-install_prereqs_debian() {
-  log "Installing dependencies via apt..."
-  run apt-get update
-  run apt-get install -y build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libudev-dev curl bzip2
+missing_packages=()
+
+check_missing_packages() {
+  local tool=$1; shift
+  local pkgs=("$@")
+  missing_packages=()
+  case "$tool" in
+    apt)
+      command -v dpkg >/dev/null 2>&1 || err "dpkg not found; cannot verify packages"
+      for pkg in "${pkgs[@]}"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || missing_packages+=("$pkg")
+      done
+      ;;
+    dnf)
+      command -v rpm >/dev/null 2>&1 || err "rpm not found; cannot verify packages"
+      for pkg in "${pkgs[@]}"; do
+        rpm -q "$pkg" >/dev/null 2>&1 || missing_packages+=("$pkg")
+      done
+      ;;
+    pacman)
+      command -v pacman >/dev/null 2>&1 || err "pacman not found; cannot verify packages"
+      for pkg in "${pkgs[@]}"; do
+        pacman -Qi "$pkg" >/dev/null 2>&1 || missing_packages+=("$pkg")
+      done
+      ;;
+    *) err "Unknown package tool: $tool" ;;
+  esac
 }
 
-install_prereqs_rocky() {
-  log "Installing dependencies via dnf (enabling EPEL/CRB if needed)..."
-  run dnf install -y epel-release
-  run dnf config-manager --set-enabled crb || run dnf config-manager --set-enabled powertools || true
-  run dnf groupinstall -y "Development Tools"
-  run dnf install -y dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconfig curl bzip2
+require_packages_or_exit() {
+  local tool=$1; shift
+  local msg=$1; shift
+  local pkgs=("$@")
+  check_missing_packages "$tool" "${pkgs[@]}"
+  if [[ ${#missing_packages[@]} -gt 0 ]]; then
+    warn "Missing packages: ${missing_packages[*]}"
+    log "To install: $msg ${missing_packages[*]}"
+    err "Prerequisite packages missing; install them and re-run"
+  fi
 }
 
-install_prereqs_arch() {
-  log "Installing dependencies via pacman..."
-  run pacman -Sy --noconfirm
-  run pacman -S --needed --noconfirm base-devel pkgconf openblas lapack gtk3 systemd curl bzip2
-  run sudo -u $SUDO_USER yay -S --noconfirm dlib
+verify_prereqs_debian() {
+  require_packages_or_exit apt "sudo apt-get install -y" "${DEBIAN_BUILD_PREREQS[@]}"
+}
+
+verify_prereqs_rocky() {
+  local enable_repos="sudo dnf install -y epel-release && sudo dnf config-manager --set-enabled crb || sudo dnf config-manager --set-enabled powertools"
+  require_packages_or_exit dnf "$enable_repos && sudo dnf install -y" "${ROCKY_BUILD_PREREQS[@]}"
+}
+
+verify_prereqs_fedora() {
+  require_packages_or_exit dnf "sudo dnf install -y" "${FEDORA_BUILD_PREREQS[@]}"
+}
+
+verify_prereqs_arch() {
+  check_missing_packages pacman "${ARCH_BUILD_PREREQS[@]}"
+  local hint="sudo pacman -S --needed ${ARCH_BUILD_PREREQS[*]}"
+  if [[ ${#missing_packages[@]} -gt 0 ]]; then
+    warn "Missing packages: ${missing_packages[*]}"
+    log "To install: $hint"
+    if [[ " ${missing_packages[*]} " =~ " dlib " ]]; then
+      log "dlib may be in AUR; install via yay -S dlib"
+    fi
+    err "Prerequisite packages missing; install them and re-run"
+  fi
 }
 
 ensure_dirs() {
@@ -134,30 +189,9 @@ ensure_dirs() {
       log "Creating directory $dir"
       run mkdir -p "$dir"
     fi
-    if [[ "$dir" == "$STORE_DIR" ]]; then
-      run chmod 0777 "$dir"
-    else
-      run chmod 0755 "$dir"
-    fi
+    run chmod 0755 "$dir"
     run chown root:root "$dir"
   done
-}
-
-default_config() {
-  cat <<EOF
-# chissu-pam default configuration
-similarity_threshold = 0.9
-capture_timeout_secs = 5
-frame_interval_millis = 500
-video_device = "/dev/video2"
-pixel_format = "GREY"
-warmup_frames = 4
-jitters = 1
-embedding_store_dir = "$STORE_DIR"
-landmark_model = "$MODEL_DIR/shape_predictor_68_face_landmarks.dat"
-encoder_model = "$MODEL_DIR/dlib_face_recognition_resnet_model_v1.dat"
-require_secret_service = true
-EOF
 }
 
 backup_if_needed() {
@@ -178,7 +212,8 @@ backup_if_needed() {
 backup_to_state() {
   local target=$1
   [[ -f "$target" ]] || return 0
-  local dest="$STATE_DIR/$(basename "$target").$(timestamp).bak"
+  local dest
+  dest="$STATE_DIR/$(basename "$target").$(timestamp).bak"
   if [[ $DRY_RUN -eq 1 ]]; then
     log "[dry-run] backup $target -> $dest"
     return 0
@@ -190,9 +225,9 @@ install_config() {
   if backup_if_needed "$CONFIG_PATH"; then
     log "Writing default config to $CONFIG_PATH"
     if [[ $DRY_RUN -eq 1 ]]; then
-      default_config | sed 's/^/[dry-run config] /'
+      render_default_config "$STORE_DIR" "$MODEL_DIR" | sed 's/^/[dry-run config] /'
     else
-      default_config > "$CONFIG_PATH"
+      render_default_config "$STORE_DIR" "$MODEL_DIR" > "$CONFIG_PATH"
       run chmod 0644 "$CONFIG_PATH"
       run chown root:root "$CONFIG_PATH"
     fi
@@ -212,14 +247,14 @@ install_binaries() {
   local cli_src="$ARTIFACT_DIR/chissu-cli"
   local pam_src="$ARTIFACT_DIR/libpam_chissu.so"
   local pam_dest
-  if [[ "$os_flavor" == "rocky" ]]; then
+  if [[ "$os_flavor" == "rocky" || "$os_flavor" == "fedora" ]]; then
     pam_dest="/usr/lib64/security/libpam_chissu.so"
   else
     pam_dest="/lib/security/libpam_chissu.so"
   fi
   copy_artifact "$cli_src" /usr/local/bin/chissu-cli 0755
   copy_artifact "$pam_src" "$pam_dest" 0644
-  if [[ "$os_flavor" == "rocky" && $DRY_RUN -eq 0 && -x /sbin/restorecon ]]; then
+  if [[ ("$os_flavor" == "rocky" || "$os_flavor" == "fedora") && $DRY_RUN -eq 0 && -x /sbin/restorecon ]]; then
     log "Applying SELinux context to $pam_dest"
     run /sbin/restorecon "$pam_dest"
   fi
@@ -245,8 +280,8 @@ fetch_model() {
 }
 
 provision_models() {
-  fetch_model "shape_predictor_68_face_landmarks.dat.bz2" "https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
-  fetch_model "dlib_face_recognition_resnet_model_v1.dat.bz2" "https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2"
+  fetch_model "$INSTALL_COMMON_LANDMARK_FILE.bz2" "$INSTALL_COMMON_LANDMARK_URL"
+  fetch_model "$INSTALL_COMMON_ENCODER_FILE.bz2" "$INSTALL_COMMON_ENCODER_URL"
 }
 
 insert_before_first_match() {
@@ -361,7 +396,13 @@ pam_install_rhel() {
   local password_auth="$profile_dir/password-auth"
 
   for f in "$system_auth" "$password_auth"; do
-    [[ -f "$f" ]] || err "Expected authselect template missing: $f"
+    if [[ ! -f "$f" ]]; then
+      if [[ $DRY_RUN -eq 1 ]]; then
+        log "[dry-run] expected authselect template would be present: $f"
+        continue
+      fi
+      err "Expected authselect template missing: $f"
+    fi
     backup_to_state "$f"
     insert_before_first_match "$f" "pam_unix.so" "$pam_auth_line"
   done
@@ -424,7 +465,7 @@ pam_install_arch() {
 wire_pam() {
   case "$os_flavor" in
     debian) pam_install_debian ;;
-    rocky) pam_install_rhel ;;
+    rocky|fedora) pam_install_rhel ;;
     arch) pam_install_arch ;;
     *) err "Unsupported distro for PAM wiring" ;;
   esac
@@ -433,7 +474,7 @@ wire_pam() {
 unwire_pam() {
   case "$os_flavor" in
     debian) pam_uninstall_debian ;;
-    rocky) pam_uninstall_rhel ;;
+    rocky|fedora) pam_uninstall_rhel ;;
     arch) pam_uninstall_arch ;;
     *) err "Unsupported distro for PAM uninstall" ;;
   esac
@@ -454,9 +495,10 @@ main() {
   fi
 
   case "$os_flavor" in
-    debian) install_prereqs_debian ;;
-    rocky) install_prereqs_rocky ;;
-    arch) install_prereqs_arch ;;
+    debian) verify_prereqs_debian ;;
+    fedora) verify_prereqs_fedora ;;
+    rocky) verify_prereqs_rocky ;;
+    arch) verify_prereqs_arch ;;
     *) err "Unsupported distro" ;;
   esac
 

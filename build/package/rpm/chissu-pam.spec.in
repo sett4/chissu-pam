@@ -33,6 +33,7 @@ cp -pr artifacts/* "%{buildroot}/"
 /usr/lib64/security/libpam_chissu.so
 %config(noreplace) /etc/chissu-pam/config.toml
 /usr/share/doc/chissu-pam/README.RPM
+/usr/share/chissu-pam/install-common.sh
 %dir /var/lib/chissu-pam
 %dir /var/lib/chissu-pam/dlib-models
 /var/lib/chissu-pam/dlib-models/.keep
@@ -48,11 +49,11 @@ STATE_DIR=/var/lib/chissu-pam/install
 PREV_FILE=$STATE_DIR/authselect.previous
 PROFILE_NAME=custom/chissu
 PAM_LINE="auth    sufficient    libpam_chissu.so"
-LANDMARK_FILE=shape_predictor_68_face_landmarks.dat
-ENCODER_FILE=dlib_face_recognition_resnet_model_v1.dat
-LANDMARK_URL=https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
-ENCODER_URL=https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2
-SKIP_DOWNLOAD="${CHISSU_PAM_SKIP_MODEL_DOWNLOAD:-0}"
+
+. /usr/share/chissu-pam/install-common.sh
+
+INSTALL_COMMON_MODEL_DIR="$MODEL_DIR"
+INSTALL_COMMON_EMBED_DIR="$EMBED_DIR"
 
 log() {
     echo "chissu-pam: $*"
@@ -61,33 +62,6 @@ log() {
 fail() {
     echo "chissu-pam: $*" >&2
     exit 1
-}
-
-maybe_download() {
-    local name="$1" url="$2" dest="$3"
-    if [ -f "$dest" ]; then
-        echo "chissu-pam: $name already present at $dest; skipping"
-        return 0
-    fi
-    if [ "$SKIP_DOWNLOAD" = "1" ]; then
-        echo "chissu-pam: skipping $name download (CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1)"
-        return 0
-    fi
-    tmp=$(mktemp -d)
-    archive="$tmp/archive.bz2"
-    echo "chissu-pam: downloading $name"
-    if ! curl -fsSL "$url" -o "$archive"; then
-        echo "chissu-pam: failed to download $url" >&2
-        rm -rf "$tmp"
-        exit 1
-    fi
-    if ! bzip2 -d -c "$archive" > "$dest"; then
-        echo "chissu-pam: failed to decompress $archive" >&2
-        rm -rf "$tmp"
-        exit 1
-    fi
-    chmod 0644 "$dest"
-    rm -rf "$tmp"
 }
 
 insert_before_first_match() {
@@ -134,8 +108,7 @@ wire_authselect() {
 }
 
 install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR" "$STATE_DIR"
-maybe_download "$LANDMARK_FILE" "$LANDMARK_URL" "$MODEL_DIR/$LANDMARK_FILE"
-maybe_download "$ENCODER_FILE" "$ENCODER_URL" "$MODEL_DIR/$ENCODER_FILE"
+maybe_download_models
 wire_authselect
 
 %postun
