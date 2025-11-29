@@ -30,10 +30,6 @@ ARCH="amd64"
 REVISION="1"
 SKIP_BUILD=0
 BUILD_DEPS=(build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libudev-dev curl bzip2 rustc cargo)
-SUDO_CMD=""
-if [[ $EUID -ne 0 ]]; then
-  SUDO_CMD="sudo"
-fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -110,20 +106,22 @@ log() {
 command -v dpkg-buildpackage >/dev/null || { echo "dpkg-buildpackage not found" >&2; exit 1; }
 command -v dh >/dev/null || { echo "debhelper (dh) not found" >&2; exit 1; }
 
-install_build_deps() {
-  if command -v apt-get >/dev/null 2>&1; then
-    log "Installing build prerequisites via apt-get: ${BUILD_DEPS[*]}"
-    if ! $SUDO_CMD apt-get update -y && $SUDO_CMD apt-get install -y "${BUILD_DEPS[@]}"; then
-      echo "Failed to install build prerequisites" >&2
-      exit 1
+require_build_deps() {
+  missing=()
+  for pkg in "${BUILD_DEPS[@]}"; do
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+      missing+=("$pkg")
     fi
-  else
-    log "apt-get not found; ensure build deps are present: ${BUILD_DEPS[*]}"
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log "Missing build prerequisites: ${missing[*]}"
+    log "Install them with: apt-get install -y ${missing[*]}"
+    exit 1
   fi
 }
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
-  install_build_deps
+  require_build_deps
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \

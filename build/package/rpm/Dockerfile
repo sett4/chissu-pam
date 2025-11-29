@@ -9,8 +9,8 @@ RUN dnf -y update && \
         rust cargo \
         dlib-devel openblas-devel lapack-devel gtk3-devel \
         systemd-devel libudev-devel openssl-devel \
-        pam-devel dbus-devel && \
-    dnf clean all && rm -rf /var/cache/dnf
+        pam-devel dbus-devel
+    # dnf clean all && rm -rf /var/cache/dnf
 
 WORKDIR /workspace
 ENV CARGO_HOME=/workspace/.cargo-home

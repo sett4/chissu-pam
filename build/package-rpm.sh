@@ -25,10 +25,6 @@ RELEASE="1"
 ARCH="x86_64"
 SKIP_BUILD=0
 BUILD_DEPS=(dbus-devel clang-libs gcc-c++ rust cargo rpm-build dlib-devel pam-devel)
-SUDO_CMD=""
-if [[ $EUID -ne 0 ]]; then
-  SUDO_CMD="sudo"
-fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -89,28 +85,28 @@ log() {
   echo "[package-rpm] $*"
 }
 
-install_build_deps() {
-  local installer=""
-  if command -v dnf >/dev/null 2>&1; then
-    installer="dnf"
-  elif command -v yum >/dev/null 2>&1; then
-    installer="yum"
-  fi
-
-  if [[ -z "$installer" ]]; then
-    log "No dnf/yum found; please install build deps manually: ${BUILD_DEPS[*]}"
-    return
-  fi
-
-  log "Installing build prerequisites via $installer: ${BUILD_DEPS[*]}"
-  if ! $SUDO_CMD $installer install -y "${BUILD_DEPS[@]}"; then
-    echo "Failed to install build prerequisites" >&2
+require_build_deps() {
+  missing=()
+  for pkg in "${BUILD_DEPS[@]}"; do
+    if ! rpm -q "$pkg" >/dev/null 2>&1; then
+      missing+=("$pkg")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log "Missing build prerequisites: ${missing[*]}"
+    if command -v dnf >/dev/null 2>&1; then
+      log "Install them with: dnf install -y ${missing[*]}"
+    elif command -v yum >/dev/null 2>&1; then
+      log "Install them with: yum install -y ${missing[*]}"
+    else
+      log "Install the missing packages using your package manager."
+    fi
     exit 1
   fi
 }
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
-  install_build_deps
+  require_build_deps
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \
