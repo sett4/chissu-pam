@@ -1,0 +1,6 @@
+Name: chissu face authentication
+Default: no
+Priority: 400
+Auth-Type: Primary
+Auth:
+        sufficient   libpam_chissu.so

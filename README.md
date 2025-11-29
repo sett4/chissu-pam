@@ -74,7 +74,7 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 
 3. **Automatic dlib weights**: during installation the `postinst` script downloads both dlib model files into `/var/lib/chissu-pam/dlib-models`. Skip downloads (for offline mirrors or air-gapped hosts) by setting `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` before running `dpkg -i`. When purging the package, set `CHISSU_PAM_PURGE_MODELS=1` to remove the downloaded weights as well.
 
-4. **Wire PAM + config**: edit `/etc/chissu-pam/config.toml` and `/etc/pam.d/<service>` as described later in this document. The packaged config template mirrors the defaults below.
+4. **PAM wiring + config**: the package registers `libpam_chissu.so` via `pam-auth-update --package --enable chissu`, inserting it ahead of `pam_unix.so`. Verify with `sudo pam-auth-update --list`. Adjust `/etc/chissu-pam/config.toml` as needed for your camera settings.
 
 #### Automated releases
 
@@ -84,8 +84,6 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 - If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
 
 #### RPM packages (Fedora/RHEL)
-
-The RPM tooling currently lives on branch `t/add-rpm-package-build` until it is merged back to `main`.
 
 1. **Build the package** (requires `rpm-build`, `createrepo-c`, and the same native deps as the Debian flow):
 
@@ -103,7 +101,7 @@ The RPM tooling currently lives on branch `t/add-rpm-package-build` until it is 
 
 3. **Automatic dlib weights**: `%post` mirrors the Debian behaviour—models are downloaded into `/var/lib/chissu-pam/dlib-models` unless `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is exported before running `dnf install`. Set `CHISSU_PAM_PURGE_MODELS=1` before uninstalling to remove the downloaded weights.
 
-4. **Configure PAM** the same way as the Debian instructions (edit `/etc/chissu-pam/config.toml`, update `/etc/pam.d/<service>`, and run `chissu-cli doctor`).
+4. **PAM wiring**: `%post` uses `authselect` to create/refresh a `custom/chissu` profile and inserts `libpam_chissu.so` before `pam_unix.so` in `system-auth` and `password-auth`. On erase, `%postun` restores the previous profile. Verify with `authselect current` and adjust `/etc/chissu-pam/config.toml` for camera options.
 
 ##### Build RPMs via Docker (Ubuntu hosts)
 

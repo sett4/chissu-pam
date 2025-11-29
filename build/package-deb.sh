@@ -167,12 +167,14 @@ fi
 mkdir -p "$ARTIFACT_DIR/usr/bin" \
          "$ARTIFACT_DIR/$PAM_DEST_REL" \
          "$ARTIFACT_DIR/etc/chissu-pam" \
-         "$ARTIFACT_DIR/usr/share/doc/chissu-pam"
+         "$ARTIFACT_DIR/usr/share/doc/chissu-pam" \
+         "$ARTIFACT_DIR/usr/share/pam-configs"
 
 cp "$BIN_SRC" "$ARTIFACT_DIR/usr/bin/chissu-cli"
 cp "$PAM_SRC" "$ARTIFACT_DIR/$PAM_DEST_REL/libpam_chissu.so"
 cp "$REPO_ROOT/build/package/assets/etc/chissu-pam/config.toml" "$ARTIFACT_DIR/etc/chissu-pam/config.toml"
 cp "$REPO_ROOT/build/package/assets/usr/share/doc/chissu-pam/README.Debian" "$ARTIFACT_DIR/usr/share/doc/chissu-pam/README.Debian"
+cp "$REPO_ROOT/build/package/assets/usr/share/pam-configs/chissu" "$ARTIFACT_DIR/usr/share/pam-configs/chissu"
 
 pushd "$SRC_DIR" >/dev/null
 log "Running dpkg-buildpackage"

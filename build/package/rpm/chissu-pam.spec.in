@@ -9,7 +9,7 @@ License:        LGPL-2.1+
 URL:            https://github.com/sett/chissu-pam
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      __ARCH__
-Requires:       dlib, openblas, lapack, gtk3, systemd-libs, libudev, curl, bzip2
+Requires:       dlib, openblas, lapack, gtk3, systemd-libs, curl, bzip2, authselect
 
 %description
 chissu-pam verifies Linux logins using an IR-capable V4L2 camera. The package
@@ -38,15 +38,30 @@ cp -pr artifacts/* "%{buildroot}/"
 /var/lib/chissu-pam/dlib-models/.keep
 %dir /var/lib/chissu-pam/embeddings
 /var/lib/chissu-pam/embeddings/.keep
+%dir /var/lib/chissu-pam/install
+/var/lib/chissu-pam/install/.keep
 
 %post
 MODEL_DIR=/var/lib/chissu-pam/dlib-models
 EMBED_DIR=/var/lib/chissu-pam/embeddings
+STATE_DIR=/var/lib/chissu-pam/install
+PREV_FILE=$STATE_DIR/authselect.previous
+PROFILE_NAME=custom/chissu
+PAM_LINE="auth    sufficient    libpam_chissu.so"
 LANDMARK_FILE=shape_predictor_68_face_landmarks.dat
 ENCODER_FILE=dlib_face_recognition_resnet_model_v1.dat
 LANDMARK_URL=https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
 ENCODER_URL=https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2
 SKIP_DOWNLOAD="${CHISSU_PAM_SKIP_MODEL_DOWNLOAD:-0}"
+
+log() {
+    echo "chissu-pam: $*"
+}
+
+fail() {
+    echo "chissu-pam: $*" >&2
+    exit 1
+}
 
 maybe_download() {
     local name="$1" url="$2" dest="$3"
@@ -75,12 +90,69 @@ maybe_download() {
     rm -rf "$tmp"
 }
 
-install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR"
+insert_before_first_match() {
+    file="$1"
+    pattern="$2"
+    newline="$3"
+    if grep -Fq "$newline" "$file"; then
+        return 0
+    fi
+    tmp=$(mktemp)
+    awk -v pat="$pattern" -v ins="$newline" 'found==0 && $0 ~ pat {print ins; found=1} {print} END {if(found==0) print ins}' "$file" > "$tmp"
+    mv "$tmp" "$file"
+}
+
+authselect_current_profile() {
+    authselect current 2>/dev/null | awk -F: '/^Profile ID:/ {gsub(/^ */,"",$2); print $2}'
+}
+
+wire_authselect() {
+    command -v authselect >/dev/null 2>&1 || fail "authselect is required to wire PAM; install authselect and retry"
+    if ! authselect check; then
+        fail "authselect is not in a consistent state; run 'authselect apply-changes' then reinstall"
+    fi
+
+    install -d -m 0755 "$STATE_DIR"
+
+    current=$(authselect_current_profile || true)
+    if [ -n "$current" ] && [ ! -f "$PREV_FILE" ]; then
+        printf '%s' "$current" > "$PREV_FILE"
+    fi
+
+    authselect create-profile chissu -b sssd >/dev/null 2>&1 || true
+    profile_dir=/etc/authselect/custom/chissu
+    system_auth="$profile_dir/system-auth"
+    password_auth="$profile_dir/password-auth"
+
+    for f in "$system_auth" "$password_auth"; do
+        [ -f "$f" ] || fail "expected authselect template missing: $f"
+        insert_before_first_match "$f" "pam_unix.so" "$PAM_LINE"
+    done
+
+    authselect select "$PROFILE_NAME" --force || fail "authselect select $PROFILE_NAME failed"
+    authselect apply-changes || fail "authselect apply-changes failed"
+}
+
+install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR" "$STATE_DIR"
 maybe_download "$LANDMARK_FILE" "$LANDMARK_URL" "$MODEL_DIR/$LANDMARK_FILE"
 maybe_download "$ENCODER_FILE" "$ENCODER_URL" "$MODEL_DIR/$ENCODER_FILE"
+wire_authselect
 
 %postun
+STATE_DIR=/var/lib/chissu-pam/install
+PREV_FILE=$STATE_DIR/authselect.previous
+
 if [ "$1" -eq 0 ]; then
+    if command -v authselect >/dev/null 2>&1; then
+        previous="sssd"
+        if [ -f "$PREV_FILE" ]; then
+            previous=$(cat "$PREV_FILE")
+        fi
+        authselect select "$previous" --force >/dev/null 2>&1 || echo "chissu-pam: failed to restore authselect profile $previous" >&2
+        authselect apply-changes >/dev/null 2>&1 || echo "chissu-pam: authselect apply-changes failed during removal" >&2
+        rm -rf /etc/authselect/custom/chissu
+    fi
+
     rm -f /etc/chissu-pam/config.toml /etc/chissu-pam/config.toml.rpmsave 2>/dev/null || true
     if [ "${CHISSU_PAM_PURGE_MODELS:-0}" = "1" ]; then
         echo "chissu-pam: removing downloaded dlib models"

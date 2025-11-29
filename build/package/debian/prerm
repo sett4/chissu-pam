@@ -2,13 +2,19 @@
 set -e
 
 case "$1" in
-    remove|upgrade|deconfigure)
-        # Nothing to do; package files are handled by dpkg.
+    remove)
+        if command -v pam-auth-update >/dev/null 2>&1; then
+            echo "chissu-pam: removing pam-auth-update entry"
+            pam-auth-update --package --remove chissu || echo "chissu-pam: pam-auth-update --remove failed" >&2
+        else
+            echo "chissu-pam: pam-auth-update missing; skipping PAM removal" >&2
+        fi
         ;;
-    failed-upgrade)
+    upgrade|deconfigure|failed-upgrade)
+        # Leave PAM wiring intact; new package version will refresh it.
         ;;
     *)
         ;;
- esac
+esac
 
 exit 0

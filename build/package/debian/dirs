@@ -2,5 +2,6 @@ etc/chissu-pam
 usr/bin
 usr/lib/x86_64-linux-gnu/security
 usr/share/doc/chissu-pam
+usr/share/pam-configs
 var/lib/chissu-pam/dlib-models
 var/lib/chissu-pam/embeddings

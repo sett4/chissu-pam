@@ -120,13 +120,14 @@ mkdir -p "$ARTIFACT_DIR/usr/bin" \
          "$ARTIFACT_DIR/etc/chissu-pam" \
          "$ARTIFACT_DIR/usr/share/doc/chissu-pam" \
          "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models" \
-         "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings"
+         "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings" \
+         "$ARTIFACT_DIR/var/lib/chissu-pam/install"
 
 cp "$BIN_SRC" "$ARTIFACT_DIR/usr/bin/chissu-cli"
 cp "$PAM_SRC" "$ARTIFACT_DIR/usr/lib64/security/libpam_chissu.so"
 cp "$REPO_ROOT/build/package/assets/etc/chissu-pam/config.toml" "$ARTIFACT_DIR/etc/chissu-pam/config.toml"
 cp "$REPO_ROOT/build/package/assets/usr/share/doc/chissu-pam/README.RPM" "$ARTIFACT_DIR/usr/share/doc/chissu-pam/README.RPM"
-touch "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings/.keep"
+touch "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/install/.keep"
 cp "$REPO_ROOT/LICENSE" "$STAGING_ROOT/LICENSE"
 
 log "Rendering spec"

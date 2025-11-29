@@ -4,11 +4,21 @@ set -e
 PKG_NAME=chissu-pam
 MODEL_DIR=/var/lib/chissu-pam/dlib-models
 EMBED_DIR=/var/lib/chissu-pam/embeddings
+PAM_SNIPPET=/usr/share/pam-configs/chissu
 LANDMARK_FILE=shape_predictor_68_face_landmarks.dat
 ENCODER_FILE=dlib_face_recognition_resnet_model_v1.dat
 LANDMARK_URL=https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
 ENCODER_URL=https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2
 SKIP_DOWNLOAD=${CHISSU_PAM_SKIP_MODEL_DOWNLOAD:-0}
+
+log() {
+    echo "$PKG_NAME: $*"
+}
+
+fail() {
+    echo "$PKG_NAME: $*" >&2
+    exit 1
+}
 
 maybe_download() {
     name="$1"
@@ -39,11 +49,25 @@ maybe_download() {
     rm -rf "$tmp"
 }
 
+wire_pam() {
+    if ! command -v pam-auth-update >/dev/null 2>&1; then
+        fail "pam-auth-update is required to wire PAM; install it and rerun 'dpkg --configure -a'"
+    fi
+    if [ ! -f "$PAM_SNIPPET" ]; then
+        fail "missing PAM snippet at $PAM_SNIPPET; package payload may be incomplete"
+    fi
+    log "Enabling pam-auth-update entry for chissu"
+    if ! pam-auth-update --package --enable chissu; then
+        fail "pam-auth-update failed; ensure PAM state is synced and retry"
+    fi
+}
+
 case "$1" in
     configure)
         install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR"
         maybe_download "$LANDMARK_FILE" "$LANDMARK_URL" "$MODEL_DIR/$LANDMARK_FILE"
         maybe_download "$ENCODER_FILE" "$ENCODER_URL" "$MODEL_DIR/$ENCODER_FILE"
+        wire_pam
         ;;
 esac
 
