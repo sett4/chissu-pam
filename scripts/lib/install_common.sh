@@ -28,6 +28,8 @@ DEBIAN_BUILD_PREREQS=(build-essential pkg-config libdlib-dev libopenblas-dev lib
 # shellcheck disable=SC2034  # exported for consumers
 ROCKY_BUILD_PREREQS=(dnf-plugins-core dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel curl bzip2 gcc gcc-c++ make)
 # shellcheck disable=SC2034  # exported for consumers
+FEDORA_BUILD_PREREQS=(dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconf curl bzip2 gcc gcc-c++ make)
+# shellcheck disable=SC2034  # exported for consumers
 ARCH_BUILD_PREREQS=(base-devel pkgconf openblas lapack gtk3 systemd curl bzip2 dlib)
 
 render_default_config() {
