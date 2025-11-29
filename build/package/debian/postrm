@@ -4,10 +4,16 @@ set -e
 CONFIG_DIR=/etc/chissu-pam
 MODEL_DIR=/var/lib/chissu-pam/dlib-models
 EMBED_DIR=/var/lib/chissu-pam/embeddings
+PAM_SNIPPET=/usr/share/pam-configs/chissu
 PURGE_MODELS=${CHISSU_PAM_PURGE_MODELS:-0}
 
 case "$1" in
     purge)
+        if command -v pam-auth-update >/dev/null 2>&1; then
+            echo "chissu-pam: cleaning pam-auth-update entry"
+            pam-auth-update --package --remove chissu || true
+        fi
+        rm -f "$PAM_SNIPPET"
         rm -f "$CONFIG_DIR/config.toml"
         if [ "$PURGE_MODELS" = "1" ]; then
             echo "chissu-pam: removing downloaded dlib models"

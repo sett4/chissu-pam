@@ -24,6 +24,7 @@ VERSION=""
 RELEASE="1"
 ARCH="x86_64"
 SKIP_BUILD=0
+BUILD_DEPS=(dbus-devel clang-libs gcc-c++ rust cargo rpm-build dlib-devel pam-devel)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -84,7 +85,28 @@ log() {
   echo "[package-rpm] $*"
 }
 
+require_build_deps() {
+  missing=()
+  for pkg in "${BUILD_DEPS[@]}"; do
+    if ! rpm -q "$pkg" >/dev/null 2>&1; then
+      missing+=("$pkg")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log "Missing build prerequisites: ${missing[*]}"
+    if command -v dnf >/dev/null 2>&1; then
+      log "Install them with: dnf install -y ${missing[*]}"
+    elif command -v yum >/dev/null 2>&1; then
+      log "Install them with: yum install -y ${missing[*]}"
+    else
+      log "Install the missing packages using your package manager."
+    fi
+    exit 1
+  fi
+}
+
 if [[ $SKIP_BUILD -eq 0 ]]; then
+  require_build_deps
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \
@@ -120,13 +142,14 @@ mkdir -p "$ARTIFACT_DIR/usr/bin" \
          "$ARTIFACT_DIR/etc/chissu-pam" \
          "$ARTIFACT_DIR/usr/share/doc/chissu-pam" \
          "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models" \
-         "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings"
+         "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings" \
+         "$ARTIFACT_DIR/var/lib/chissu-pam/install"
 
 cp "$BIN_SRC" "$ARTIFACT_DIR/usr/bin/chissu-cli"
 cp "$PAM_SRC" "$ARTIFACT_DIR/usr/lib64/security/libpam_chissu.so"
 cp "$REPO_ROOT/build/package/assets/etc/chissu-pam/config.toml" "$ARTIFACT_DIR/etc/chissu-pam/config.toml"
 cp "$REPO_ROOT/build/package/assets/usr/share/doc/chissu-pam/README.RPM" "$ARTIFACT_DIR/usr/share/doc/chissu-pam/README.RPM"
-touch "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings/.keep"
+touch "$ARTIFACT_DIR/var/lib/chissu-pam/dlib-models/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/embeddings/.keep" "$ARTIFACT_DIR/var/lib/chissu-pam/install/.keep"
 cp "$REPO_ROOT/LICENSE" "$STAGING_ROOT/LICENSE"
 
 log "Rendering spec"
