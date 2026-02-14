@@ -184,7 +184,7 @@ verify_prereqs_arch() {
 }
 
 ensure_dirs() {
-  for dir in /etc/chissu-pam /usr/local/etc/chissu-pam "$MODEL_DIR" "$STORE_DIR"; do
+  for dir in /etc/chissu-pam /usr/local/etc/chissu-pam "$MODEL_DIR"; do
     if [[ ! -d "$dir" ]]; then
       log "Creating directory $dir"
       run mkdir -p "$dir"
@@ -192,6 +192,14 @@ ensure_dirs() {
     run chmod 0755 "$dir"
     run chown root:root "$dir"
   done
+
+  if [[ ! -d "$STORE_DIR" ]]; then
+    log "Creating directory $STORE_DIR"
+    run mkdir -p "$STORE_DIR"
+  fi
+  # Embedding stores are user-created while PAM/root must still read them.
+  run chmod 01733 "$STORE_DIR"
+  run chown root:root "$STORE_DIR"
 }
 
 backup_if_needed() {

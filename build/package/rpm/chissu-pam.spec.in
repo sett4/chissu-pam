@@ -107,7 +107,8 @@ wire_authselect() {
     authselect apply-changes || fail "authselect apply-changes failed"
 }
 
-install -d -m 0755 "$MODEL_DIR" "$EMBED_DIR" "$STATE_DIR"
+install -d -m 0755 "$MODEL_DIR" "$STATE_DIR"
+install -d -m 01733 "$EMBED_DIR"
 maybe_download_models
 wire_authselect
 

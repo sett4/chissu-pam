@@ -291,13 +291,13 @@ fn check_embedding_dir(cfg: &ResolvedConfigWithSource) -> DoctorCheck {
             device: None,
         },
         (true, true) => {
-            let readable = fs::read_dir(path).is_ok();
+            let traversable = is_traversable_dir(path);
             let writeable = is_writeable_dir(path);
-            if readable && writeable {
+            if traversable && writeable {
                 DoctorCheck {
                     name: CHECK_EMBEDDING_DIR.into(),
                     status: CheckStatus::Pass,
-                    message: format!("Embedding store {} is readable/writable", path.display()),
+                    message: format!("Embedding store {} is traversable/writable", path.display()),
                     path: Some(path.display().to_string()),
                     device: None,
                 }
@@ -306,12 +306,12 @@ fn check_embedding_dir(cfg: &ResolvedConfigWithSource) -> DoctorCheck {
                     name: CHECK_EMBEDDING_DIR.into(),
                     status: CheckStatus::Fail,
                     message: format!(
-                        "Embedding store {} lacks {} permissions",
+                        "Embedding store {} lacks {} permissions (for shared enrollment use root:root mode 01733)",
                         path.display(),
-                        if !readable && !writeable {
-                            "read/write"
-                        } else if !readable {
-                            "read"
+                        if !traversable && !writeable {
+                            "traverse/write"
+                        } else if !traversable {
+                            "traverse"
                         } else {
                             "write"
                         }
@@ -567,6 +567,14 @@ fn is_writeable_dir(path: &Path) -> bool {
         Err(_) => return false,
     };
     unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
+}
+
+fn is_traversable_dir(path: &Path) -> bool {
+    let c_path = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    unsafe { libc::access(c_path.as_ptr(), libc::X_OK) == 0 }
 }
 
 #[cfg(test)]
@@ -878,6 +886,36 @@ mod tests {
         );
         assert_eq!(
             status(&outcome.checks, CHECK_PAM_MODULE).status,
+            CheckStatus::Pass
+        );
+    }
+
+    #[test]
+    fn doctor_accepts_sticky_non_listable_embedding_dir() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        fs::set_permissions(tmp.path().join("store"), fs::Permissions::from_mode(0o1733)).unwrap();
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"{}\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("video0").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+
+        let outcome = doctor_with(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+        );
+
+        assert_eq!(
+            status(&outcome.checks, CHECK_EMBEDDING_DIR).status,
             CheckStatus::Pass
         );
     }

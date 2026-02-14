@@ -41,7 +41,8 @@ maybe_download() {
 }
 
 maybe_download_models() {
-    install -d -m 0755 "$INSTALL_COMMON_MODEL_DIR" "$INSTALL_COMMON_EMBED_DIR"
+    install -d -m 0755 "$INSTALL_COMMON_MODEL_DIR"
+    install -d -m 01733 "$INSTALL_COMMON_EMBED_DIR"
     maybe_download "$LANDMARK_FILE" "$LANDMARK_URL" "$INSTALL_COMMON_MODEL_DIR/$LANDMARK_FILE"
     maybe_download "$ENCODER_FILE" "$ENCODER_URL" "$INSTALL_COMMON_MODEL_DIR/$ENCODER_FILE"
 }
