@@ -384,7 +384,8 @@ fn check_pam_module(referenced: &[PathBuf], fallback_paths: &[PathBuf]) -> Docto
     };
     targets.dedup();
 
-    let mut failures = Vec::new();
+    let mut missing = Vec::new();
+    let mut insecure = Vec::new();
     let mut passes = Vec::new();
 
     for path in &targets {
@@ -393,7 +394,7 @@ fn check_pam_module(referenced: &[PathBuf], fallback_paths: &[PathBuf]) -> Docto
                 if let Ok(metadata) = file.metadata() {
                     let mode = metadata.permissions().mode();
                     if mode & 0o022 != 0 {
-                        failures.push(format!(
+                        insecure.push(format!(
                             "{} is world/group-writable (mode {:o})",
                             path.display(),
                             mode & 0o777
@@ -403,8 +404,18 @@ fn check_pam_module(referenced: &[PathBuf], fallback_paths: &[PathBuf]) -> Docto
                 }
                 passes.push(path.display().to_string());
             }
-            Err(err) => failures.push(format!("{}: {}", path.display(), err)),
+            Err(err) => missing.push(format!("{}: {}", path.display(), err)),
         }
+    }
+
+    if !insecure.is_empty() {
+        return DoctorCheck {
+            name: CHECK_PAM_MODULE.into(),
+            status: CheckStatus::Fail,
+            message: format!("PAM module validation failed: {}", insecure.join("; ")),
+            path: None,
+            device: None,
+        };
     }
 
     if passes.is_empty() {
@@ -421,14 +432,14 @@ fn check_pam_module(referenced: &[PathBuf], fallback_paths: &[PathBuf]) -> Docto
                     display_paths(&targets)
                 )
             } else {
-                format!("PAM module validation failed: {}", failures.join("; "))
+                format!("PAM module validation failed: {}", missing.join("; "))
             },
             path: None,
             device: None,
         };
     }
 
-    if failures.is_empty() {
+    if missing.is_empty() {
         DoctorCheck {
             name: CHECK_PAM_MODULE.into(),
             status: CheckStatus::Pass,
@@ -439,13 +450,13 @@ fn check_pam_module(referenced: &[PathBuf], fallback_paths: &[PathBuf]) -> Docto
     } else {
         DoctorCheck {
             name: CHECK_PAM_MODULE.into(),
-            status: CheckStatus::Fail,
+            status: CheckStatus::Pass,
             message: format!(
-                "Some PAM modules invalid: {}; ok: {}",
-                failures.join(", "),
-                passes.join(", ")
+                "Validated PAM module(s): {}; ignored unavailable candidate(s): {}",
+                passes.join(", "),
+                missing.join("; ")
             ),
-            path: None,
+            path: Some(passes.join(", ")),
             device: None,
         }
     }
@@ -917,6 +928,86 @@ mod tests {
         assert_eq!(
             status(&outcome.checks, CHECK_EMBEDDING_DIR).status,
             CheckStatus::Pass
+        );
+    }
+
+    #[test]
+    fn doctor_accepts_when_any_pam_module_candidate_is_valid() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"{}\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("video0").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+
+        let fallback_ok = tmp.path().join("security/libpam_chissu.so");
+        fs::create_dir_all(fallback_ok.parent().unwrap()).unwrap();
+        File::create(&fallback_ok).unwrap();
+        fs::set_permissions(&fallback_ok, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let paths = DoctorPaths {
+            config_paths: vec![tmp.path().join("config.toml")],
+            pam_module_paths: vec![
+                tmp.path().join("missing/libpam_chissu.so"),
+                fallback_ok.clone(),
+                tmp.path().join("missing2/libpam_chissu.so"),
+            ],
+            pamd_dir: tmp.path().join("pam.d"),
+        };
+
+        let outcome = doctor_with(
+            paths,
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+        );
+
+        assert_eq!(
+            status(&outcome.checks, CHECK_PAM_MODULE).status,
+            CheckStatus::Pass
+        );
+    }
+
+    #[test]
+    fn doctor_fails_when_referenced_module_permissions_are_insecure() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        let module = tmp.path().join("libpam_chissu.so");
+        fs::set_permissions(&module, fs::Permissions::from_mode(0o666)).unwrap();
+        fs::write(
+            tmp.path().join("pam.d/login"),
+            format!("auth sufficient {}\n", module.display()),
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"{}\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("video0").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+
+        let outcome = doctor_with(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+        );
+
+        assert_eq!(
+            status(&outcome.checks, CHECK_PAM_MODULE).status,
+            CheckStatus::Fail
         );
     }
 }
