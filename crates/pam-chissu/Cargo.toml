@@ -23,3 +23,4 @@ zbus = { version = "4.4", default-features = false, features = ["async-io", "blo
 
 [dev-dependencies]
 tempfile = "3"
+serial_test = "3"
