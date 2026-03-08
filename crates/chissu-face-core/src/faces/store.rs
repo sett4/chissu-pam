@@ -12,7 +12,7 @@ use tempfile::NamedTempFile;
 
 use crate::errors::{AppError, AppResult};
 
-const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/models";
+const DEFAULT_STORE_DIR: &str = "/var/lib/chissu-pam/embeddings";
 const FEATURE_STORE_ENV: &str = "CHISSU_PAM_STORE_DIR";
 const STORE_VERSION: u32 = 1;
 const STORE_ALGORITHM: &str = "AES-256-GCM";

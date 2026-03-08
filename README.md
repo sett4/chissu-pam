@@ -22,7 +22,7 @@ This repository is in an early, exploratory phase: interfaces move quickly, pers
 
 ## Why This Project
 
-- **Secret Service–backed encryption.** Embedding stores are wrapped with AES-GCM keys managed by the GNOME Secret Service (`chissu-cli keyring ...`). Even if `/var/lib/chissu-pam/models/*.json` leaks, the ciphertext is unreadable until the legitimate user session unlocks the keyring.
+- **Secret Service–backed encryption.** Embedding stores are wrapped with AES-GCM keys managed by the GNOME Secret Service (`chissu-cli keyring ...`). Even if `/var/lib/chissu-pam/embeddings/*.json` leaks, the ciphertext is unreadable until the legitimate user session unlocks the keyring.
 - **Root privileges only for system wiring.** Daily capture, enrollment, and embedding store maintenance all run unprivileged inside the user’s desktop session so Secret Service is reachable. Elevated access is required only for installing binaries, copying `/etc/chissu-pam/config.toml`, or editing `/etc/pam.d/<service>`.
 
 ## Getting Started
@@ -293,7 +293,7 @@ sudo \
   chissu-cli enroll --user bob
 ```
 
-`sudo` is required because `/var/lib/chissu-pam/models/bob.json` is root-owned. The helper still talks to Bob’s Secret Service instance and refuses to enroll if it cannot obtain the AES-GCM key or if the service is locked.
+`sudo` is required because `/var/lib/chissu-pam/embeddings/bob.json` is root-owned. The helper still talks to Bob’s Secret Service instance and refuses to enroll if it cannot obtain the AES-GCM key or if the service is locked.
 
 ### PAM facial authentication
 
@@ -306,7 +306,7 @@ The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Li
   - `capture_timeout_secs = 5`
   - `frame_interval_millis = 500`
   - `video_device = "/dev/video0"`
-  - `embedding_store_dir = "/var/lib/chissu-pam/models"`
+  - `embedding_store_dir = "/var/lib/chissu-pam/embeddings"`
   - `pixel_format = "Y16"`
   - `warmup_frames = 0`
   - `jitters = 1`
@@ -334,7 +334,7 @@ The first file that exists wins for each key; CLI flags or environment variables
 | `video_device`                                   | Default V4L2 path (`/dev/video0` fallback).                                                |
 | `pixel_format`                                   | Negotiated capture pixel format (`Y16` fallback).                                          |
 | `warmup_frames`                                  | Number of frames to discard before saving.                                                 |
-| `embedding_store_dir`                            | Directory for encrypted embedding files (`/var/lib/chissu-pam/models`).                    |
+| `embedding_store_dir`                            | Directory for encrypted embedding files (`/var/lib/chissu-pam/embeddings`).                |
 | `landmark_model` / `encoder_model`               | Paths to the dlib weights (overrideable via `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`). |
 | `similarity_threshold`                           | PAM acceptance threshold (default `0.9`).                                                  |
 | `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |

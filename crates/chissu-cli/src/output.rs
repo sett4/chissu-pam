@@ -178,7 +178,7 @@ mod tests {
     fn auto_enroll_json_includes_required_fields() {
         let enrollment = FaceEnrollmentOutcome {
             user: "alice".into(),
-            store_path: PathBuf::from("/var/lib/chissu-pam/models/alice.json"),
+            store_path: PathBuf::from("/var/lib/chissu-pam/embeddings/alice.json"),
             added: vec![EnrollmentRecord {
                 id: "abc".into(),
                 embedding_len: 128,
