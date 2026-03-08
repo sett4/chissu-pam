@@ -16,7 +16,7 @@ The module MUST load operational parameters from TOML configuration files via th
 
 #### Scenario: Shared loader keeps CLI and PAM aligned
 - **GIVEN** both `chissu-cli` and `pam-chissu` import the `chissu-config` crate
-- **WHEN** `/etc/chussu-pam/config.toml` defines `video_device = "/dev/video2"`, `warmup_frames = 6`, and `embedding_store_dir = "/srv/chissu/embeddings"` (or the legacy `descriptor_store_dir`)
+- **WHEN** `/etc/chissu-pam/config.toml` defines `video_device = "/dev/video2"`, `warmup_frames = 6`, and `embedding_store_dir = "/srv/chissu/embeddings"` (or the legacy `descriptor_store_dir`)
 - **THEN** the PAM module resolves those values through the shared loader in the same order (primary path → secondary path → defaults) as the CLI
 - **AND** any parse/read failure bubbles up from the shared loader so both binaries report the same error wording.
 
