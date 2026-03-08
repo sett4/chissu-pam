@@ -54,7 +54,7 @@ The installer SHALL create the standard configuration and data directories, seed
 #### Scenario: Default config written with backup protection
 
 - **WHEN** `/etc/chissu-pam/config.toml` is absent
-- **THEN** the installer writes a template that reflects current defaults (`video_device = "/dev/video0"`, `pixel_format = "Y16"`, `warmup_frames = 0`, `embedding_store_dir = "/var/lib/chissu-pam/embeddings"`, commented `landmark_model` and `encoder_model` pointing to `/var/lib/chissu-pam/dlib-models/*.dat`)
+- **THEN** the installer writes a template that reflects current defaults (`video_device = "/dev/video0"`, `pixel_format = "Y16"`, `warmup_frames = 4`, `embedding_store_dir = "/var/lib/chissu-pam/embeddings"`, commented `landmark_model` and `encoder_model` pointing to `/var/lib/chissu-pam/dlib-models/*.dat`)
 - **AND** if the file already exists, the installer leaves it untouched unless `--force` is provided, in which case it saves a timestamped backup before overwriting.
 
 #### Scenario: Data directories created with restrictive modes
