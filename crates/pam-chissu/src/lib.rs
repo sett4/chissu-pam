@@ -22,7 +22,7 @@ use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
 use libc::{c_int, free};
 use logind::LogindInspector;
-use nix::unistd::User;
+use nix::unistd::{getegid, geteuid, User};
 use pam_sys::{
     get_item, get_user, ConvClosure, PamConversation, PamHandle, PamItemType, PamMessage,
     PamMessageStyle, PamResponse, PamReturnCode,
@@ -376,6 +376,7 @@ fn authenticate_user(
 
     if config.require_secret_service {
         helper_env = prepare_helper_env(request, logger);
+        log_privilege_drop_context(&request.user, logger);
         match run_secret_service_helper(&request.user, config.capture_timeout, helper_env.as_ref())
         {
             Ok(HelperResponse::Key(key_bytes)) => {
@@ -401,11 +402,7 @@ fn authenticate_user(
             Err(SecretHelperError::SecretServiceUnavailable(message)) => {
                 return Err(AuthError::SecretServiceUnavailable(message));
             }
-            Err(SecretHelperError::IpcFailure(message)) => {
-                return Err(AuthError::Pam(format!(
-                    "Secret Service helper failed: {message}"
-                )));
-            }
+            Err(err) => return Err(map_secret_helper_error(err)),
         }
     } else {
         logger.info("Secret Service probe disabled via configuration; continuing without check");
@@ -627,14 +624,7 @@ fn load_embedding_store(
                         ));
                         return Err(AuthError::SecretServiceUnavailable(message));
                     }
-                    Err(SecretHelperError::SecretServiceUnavailable(message)) => {
-                        return Err(AuthError::SecretServiceUnavailable(message));
-                    }
-                    Err(SecretHelperError::IpcFailure(message)) => {
-                        return Err(AuthError::Pam(format!(
-                            "Secret Service helper failed: {message}"
-                        )));
-                    }
+                    Err(err) => return Err(map_secret_helper_error(err)),
                 }
             }
             Err(err) => return Err(AuthError::Core(err)),
@@ -651,6 +641,40 @@ fn notify_secret_service_unavailable(
         "Secret Service unavailable; skipping face authentication: {reason}"
     ));
     messenger.send_error_msg(logger, SECRET_SERVICE_FALLBACK_PROMPT);
+}
+
+fn map_secret_helper_error(err: SecretHelperError) -> AuthError {
+    match err {
+        SecretHelperError::SecretServiceUnavailable(message) => {
+            AuthError::SecretServiceUnavailable(message)
+        }
+        SecretHelperError::PrivilegeDrop(failure) if failure.is_eperm() => {
+            AuthError::SecretServiceUnavailable(format!(
+                "Secret Service helper {}",
+                failure.message()
+            ))
+        }
+        SecretHelperError::PrivilegeDrop(failure) => {
+            AuthError::Pam(format!("Secret Service helper {}", failure.message()))
+        }
+        SecretHelperError::IpcFailure(message) => {
+            AuthError::Pam(format!("Secret Service helper failed: {message}"))
+        }
+    }
+}
+
+fn log_privilege_drop_context(user: &str, logger: &mut PamLogger) {
+    let Ok(Some(info)) = User::from_name(user) else {
+        return;
+    };
+
+    let current_uid = geteuid();
+    let current_gid = getegid();
+    if current_uid == info.uid && current_gid == info.gid {
+        logger.info(&format!(
+            "Secret Service helper privilege drop skipped for user '{user}': already running as target uid/gid"
+        ));
+    }
 }
 
 fn load_config() -> PamResult<ResolvedConfigWithSource> {
@@ -828,6 +852,7 @@ unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {
 mod tests {
     use super::*;
     use chissu_face_core::faces::BoundingBox;
+    use secret_helper::{HelperError, PrivilegeDropStage};
     use serial_test::serial;
     use std::ffi::CStr;
     use std::io::Write;
@@ -1017,6 +1042,40 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, PamMessageStyle::ERROR_MSG);
         assert_eq!(entries[0].1, SECRET_SERVICE_FALLBACK_PROMPT);
+    }
+
+    #[test]
+    fn map_secret_helper_error_treats_eperm_as_secret_service_unavailable() {
+        let err = map_secret_helper_error(HelperError::PrivilegeDrop(
+            secret_helper::PrivilegeDropFailure::new(
+                PrivilegeDropStage::Setuid,
+                "privilege drop failed at setuid: EPERM: Operation not permitted".into(),
+                Some(libc::EPERM),
+            ),
+        ));
+        assert!(
+            matches!(err, AuthError::SecretServiceUnavailable(message) if message.contains("setuid"))
+        );
+    }
+
+    #[test]
+    fn map_secret_helper_error_keeps_non_eperm_privilege_drop_fatal() {
+        let err = map_secret_helper_error(HelperError::PrivilegeDrop(
+            secret_helper::PrivilegeDropFailure::new(
+                PrivilegeDropStage::Setgid,
+                "privilege drop failed at setgid: EINVAL".into(),
+                Some(libc::EINVAL),
+            ),
+        ));
+        assert!(matches!(err, AuthError::Pam(message) if message.contains("setgid")));
+    }
+
+    #[test]
+    fn map_secret_helper_error_keeps_ipc_failures_fatal() {
+        let err = map_secret_helper_error(HelperError::IpcFailure(
+            "helper produced no response".into(),
+        ));
+        assert!(matches!(err, AuthError::Pam(message) if message.contains("no response")));
     }
 
     #[test]
