@@ -6,9 +6,11 @@ and PAM module (`/usr/lib64/security/libpam_chissu.so`).
 
 Post-install checklist:
   * Edit `/etc/chissu-pam/config.toml` to match your camera and model paths.
-  * Ensure `/var/lib/chissu-pam/dlib-models/` is writable by the PAM service.
+  * Ensure `/var/lib/chissu-pam/dlib-models/` is readable by the PAM service.
     The `%post` script downloads the dlib weights unless
     `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is set.
+  * Keep `/var/lib/chissu-pam/embeddings/` at `root:root` mode `01733` so
+    unprivileged users can enroll while sticky-bit protects per-user files.
   * Add `auth sufficient pam_chissu.so` to an appropriate entry under
     `/etc/pam.d/` once you've verified `chissu-cli doctor` succeeds.
   * Rerun `dnf install ./chissu-pam-<version>.rpm` when upgrading; `%postun`

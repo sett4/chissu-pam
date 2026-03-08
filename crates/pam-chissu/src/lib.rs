@@ -828,6 +828,7 @@ unsafe fn get_service_name(pamh: *mut PamHandle) -> PamResult<String> {
 mod tests {
     use super::*;
     use chissu_face_core::faces::BoundingBox;
+    use serial_test::serial;
     use std::ffi::CStr;
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
@@ -986,6 +987,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn messenger_emits_text_and_error_messages() {
         conversation_log().lock().unwrap().clear();
         let mut messenger = PamConversationMessenger::from_callback(recording_conv);
@@ -1003,6 +1005,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn secret_service_unavailable_prompt_is_concise() {
         conversation_log().lock().unwrap().clear();
         let mut messenger = PamConversationMessenger::from_callback(recording_conv);

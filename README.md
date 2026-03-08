@@ -132,11 +132,12 @@ The container writes artifacts back into `dist/` inside your working tree. Pass 
    sudo install -m 0755 target/release/chissu-cli /usr/local/bin/chissu-cli
    ```
 
-3. **Create Model dir**:
+3. **Create store/model directories**:
 
    ```bash
-   sudo mkdir -p /var/lib/chissu-pam/models
-   sudo chmod 0666 /var/lib/chissu-pam/models
+   sudo mkdir -p /var/lib/chissu-pam/embeddings
+   sudo chown root:root /var/lib/chissu-pam/embeddings
+   sudo chmod 01733 /var/lib/chissu-pam/embeddings
 
    sudo mkdir -p /var/lib/chissu-pam/dlib-models
    sudo curl https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 -o /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2
@@ -193,14 +194,14 @@ If you already have release artifacts (or a downloaded bundle) you can let the r
 sudo scripts/install-chissu.sh \
   --artifact-dir target/release \
   --model-dir /var/lib/chissu-pam/dlib-models \
-  --store-dir /var/lib/chissu-pam/models
+  --store-dir /var/lib/chissu-pam/embeddings
 ```
 
 - Auto-detects Ubuntu/Debian vs Fedora vs Rocky Linux vs Arch Linux, **does not install packages automatically**, and instead prints a command to install any missing prerequisites before continuing. PAM module goes to `/lib/security` (Debian/Ubuntu/Arch) or `/usr/lib64/security` (Fedora/Rocky, with `restorecon` when available).
 - On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, `rust`, and `bzip2`. dlib is in AUR, so `yay -S dlib`.
 - Wires PAM automatically per distro with a single `auth sufficient libpam_chissu.so` entry placed **before** `pam_unix.so`: Debian/Ubuntu via `pam-auth-update` snippet `/usr/share/pam-configs/chissu`, Fedora/RHEL/Rocky via an `authselect` custom profile, Arch by including a `/etc/pam.d/chissu` stack from `system-local-login`/`login`.
 - Supports rollbacks with `--uninstall` (removes only the PAM wiring using distro-native tools) and `--dry-run` to preview all changes. Backups land in `/var/lib/chissu-pam/install/`.
-- Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{models,dlib-models}` exist. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
+- Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{embeddings,dlib-models}` exist. The embedding directory is enforced as `root:root` mode `01733` so unprivileged users can run `chissu-cli enroll` while directory listing is restricted and PAM/root can still read stores. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
 - Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
 - Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
 

@@ -32,7 +32,7 @@ sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/s
    ```
    `libpam_chissu.so` only implements the `auth` facility; place it **before `pam_unix.so`** so face verification runs ahead of password prompts. Use `required` instead of `sufficient` if you prefer to keep password fallback.
    The repo installer wires this automatically per distro (Debian/Ubuntu via `pam-auth-update`, RHEL/Fedora via `authselect`, Arch via an include in `system-local-login`/`login`) and supports `--uninstall` to revert the PAM edits.
-3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/models/<user>.json` for every user that should pass facial authentication. You can now run `chissu-cli enroll` to capture a frame, extract embeddings, and store them in one command. It inherits the configured video device/pixel format *and* `landmark_model`/`encoder_model` paths, defaults the target user to the invoking account, and only honors `--user <name>` overrides when executed as `root`.
+3. Ensure `faces enroll` has populated `/var/lib/chissu-pam/embeddings/<user>.json` for every user that should pass facial authentication. You can now run `chissu-cli enroll` to capture a frame, extract embeddings, and store them in one command. It inherits the configured video device/pixel format *and* `landmark_model`/`encoder_model` paths, defaults the target user to the invoking account, and only honors `--user <name>` overrides when executed as `root`.
 4. Restart services or daemons that cache PAM state if necessary (e.g., `systemctl restart sshd`).
 
 ## Configuration
@@ -44,7 +44,7 @@ similarity_threshold = 0.75     # Float, default 0.9
 capture_timeout_secs = 8        # Integer seconds, default 5
 frame_interval_millis = 300     # Integer ms between samples, default 500
 video_device = "/dev/video2"   # String, default "/dev/video0"
-embedding_store_dir = "/srv/face-store"  # Path, default "/var/lib/chissu-pam/models"
+embedding_store_dir = "/srv/face-store"  # Path, default "/var/lib/chissu-pam/embeddings"
 pixel_format = "Y16"            # V4L2 fourcc, default "Y16"
 warmup_frames = 2               # Discarded per-sample warm-up frames, default 0
 jitters = 2                     # Dlib jitter passes, default 1
@@ -102,7 +102,7 @@ Hardware-free integration tests are not included yet; the module expects a real 
 ## Manual verification checklist
 
 1. Enroll embeddings for a test user (`faces enroll --user testuser <embedding.json>`).
-2. Confirm `/var/lib/chissu-pam/models/testuser.json` exists and contains at least one embedding.
+2. Confirm `/var/lib/chissu-pam/embeddings/testuser.json` exists and contains at least one embedding.
 3. Prepare `/etc/chissu-pam/config.toml` with the desired device path and threshold.
 4. Enable the PAM module for a non-critical service (e.g., create `/etc/pam.d/chissu-test` referencing only `libpam_chissu.so`).
 5. Use `pamtester` or `su testuser -s /bin/bash` to initiate authentication. Watch `journalctl -f -t pam_chissu` for log entries:
@@ -121,7 +121,7 @@ Hardware-free integration tests are not included yet; the module expects a real 
 
 ## Security notes
 
-- Keep embedding stores protected (`0600` is enforced during writes). Apply discretionary access controls if `/var/lib/chissu-pam/models` is relocated.
+- Keep embedding stores protected (`0600` is enforced during writes). For shared enrollment under PAM, use an embedding directory like `/var/lib/chissu-pam/embeddings` with `root:root` mode `01733` so users can create their own store files while sticky bit prevents cross-user deletes and directory listing is restricted.
 - Threshold tuning is critical: too low allows false positives, too high increases lockouts.
 - Consider combining the module with a secondary factor (password, token) using the PAM control flags appropriate for your deployment.
 - Monitor syslog for repeated failures—excessive timeouts may indicate camera faults or attempts to spoof the sensor.
