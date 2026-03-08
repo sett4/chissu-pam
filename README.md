@@ -34,13 +34,13 @@ This repository is in an early, exploratory phase: interfaces move quickly, pers
 - GNOME Secret Service (or another libsecret-compatible keyring) running in the target user session.
 - systemd-logind (via `systemd-logind.service`) with an active desktop session for every user that expects face unlock. PAM uses logind's `Display`, `Type`, and runtime environment to reach Secret Service during non-graphical prompts (polkit-1, 1Password, etc.).
 - Required kernel permissions to access `/dev/video*` devices.
-- System libraries needed by the dlib face-recognition bindings.
+- System libraries needed by the dlib face-recognition bindings, `bindgen`/`libclang`, and PAM development headers.
 
 Install the native dependencies on Debian/Ubuntu with:
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libgtk-3-dev libudev-dev
+sudo apt install -y build-essential pkg-config libclang-dev libdlib-dev libopenblas-dev liblapack-dev libatlas-base-dev libgtk-3-dev libudev-dev libpam0g-dev
 ```
 
 #### Download the dlib models
@@ -85,13 +85,14 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 
 #### RPM packages (Fedora/RHEL)
 
-1. **Build the package** (requires `rpm-build`, `createrepo-c`, and the same native deps as the Debian flow):
+1. **Build the package** (requires `rpm-build`, `createrepo-c`, `clang`, `pam-devel`, `dlib-devel`, `openblas-devel`, `lapack-devel`, `gtk3-devel`, `systemd-devel`, and `libudev-devel`):
 
    ```bash
    build/package-rpm.sh --distro fedora   # add --version <semver> to override
    ```
 
    Add `--skip-build` if you've already produced release binaries via another step. Artifacts land in `dist/chissu-pam_<version>_<distro>_x86_64.rpm`.
+   Debian/Ubuntu's `libatlas-base-dev` does not map 1:1 on RedHat-family systems; this project uses `openblas-devel` plus `lapack-devel` there instead of a separate `atlas` package.
 
 2. **Install the package**:
 

@@ -24,11 +24,11 @@ INSTALL_COMMON_ENCODER_URL="https://dlib.net/files/${INSTALL_COMMON_ENCODER_FILE
 
 # Build-time prerequisite packages per distro (used by installer preflight and packaging helpers)
 # shellcheck disable=SC2034  # exported for consumers
-DEBIAN_BUILD_PREREQS=(build-essential pkg-config libdlib-dev libopenblas-dev liblapack-dev libudev-dev curl bzip2 rustc cargo)
+DEBIAN_BUILD_PREREQS=(build-essential pkg-config libclang-dev libdlib-dev libopenblas-dev liblapack-dev libatlas-base-dev libudev-dev libpam0g-dev curl bzip2 rustc cargo)
 # shellcheck disable=SC2034  # exported for consumers
-ROCKY_BUILD_PREREQS=(dnf-plugins-core dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel curl bzip2 gcc gcc-c++ make)
+ROCKY_BUILD_PREREQS=(dnf-plugins-core clang pam-devel dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel curl bzip2 gcc gcc-c++ make)
 # shellcheck disable=SC2034  # exported for consumers
-FEDORA_BUILD_PREREQS=(dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconf curl bzip2 gcc gcc-c++ make)
+FEDORA_BUILD_PREREQS=(clang pam-devel dlib dlib-devel openblas-devel lapack-devel gtk3-devel systemd-devel pkgconf curl bzip2 gcc gcc-c++ make)
 # shellcheck disable=SC2034  # exported for consumers
 ARCH_BUILD_PREREQS=(base-devel pkgconf openblas lapack gtk3 systemd curl bzip2 dlib)
 
