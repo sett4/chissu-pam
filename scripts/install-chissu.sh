@@ -38,7 +38,7 @@ Usage: install-chissu.sh [options]
 Options:
   --artifact-dir DIR      Directory containing chissu-cli and libpam_chissu.so (default: target/release)
   --model-dir DIR         Destination for dlib model .dat files (default: /var/lib/chissu-pam/dlib-models)
-  --store-dir DIR         Destination for embedding store (default: /var/lib/chissu-pam/models)
+  --store-dir DIR         Destination for embedding store (default: /var/lib/chissu-pam/embeddings)
   --config-path PATH      Destination for chissu-pam config (default: /etc/chissu-pam/config.toml)
   --dry-run               Print actions without making changes
   --uninstall             Remove PAM wiring only (restores previous distro-specific state when possible)

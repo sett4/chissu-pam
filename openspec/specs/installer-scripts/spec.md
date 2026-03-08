@@ -54,13 +54,13 @@ The installer SHALL create the standard configuration and data directories, seed
 #### Scenario: Default config written with backup protection
 
 - **WHEN** `/etc/chissu-pam/config.toml` is absent
-- **THEN** the installer writes a template that reflects current defaults (`video_device = "/dev/video0"`, `pixel_format = "Y16"`, `warmup_frames = 0`, `embedding_store_dir = "/var/lib/chissu-pam/models"`, commented `landmark_model` and `encoder_model` pointing to `/var/lib/chissu-pam/dlib-models/*.dat`)
+- **THEN** the installer writes a template that reflects current defaults (`video_device = "/dev/video0"`, `pixel_format = "Y16"`, `warmup_frames = 0`, `embedding_store_dir = "/var/lib/chissu-pam/embeddings"`, commented `landmark_model` and `encoder_model` pointing to `/var/lib/chissu-pam/dlib-models/*.dat`)
 - **AND** if the file already exists, the installer leaves it untouched unless `--force` is provided, in which case it saves a timestamped backup before overwriting.
 
 #### Scenario: Data directories created with restrictive modes
 
 - **WHEN** the installer prepares state directories
-- **THEN** it ensures `/etc/chissu-pam/`, `/usr/local/etc/chissu-pam/`, `/var/lib/chissu-pam/models`, and `/var/lib/chissu-pam/dlib-models` exist with owner `root:root` (or configurable) and modes no more permissive than `0755` for directories and `0644` for files.
+- **THEN** it ensures `/etc/chissu-pam/`, `/usr/local/etc/chissu-pam/`, `/var/lib/chissu-pam/embeddings`, and `/var/lib/chissu-pam/dlib-models` exist with owner `root:root` (or configurable) and modes no more permissive than `0755` for directories and `0644` for files.
 
 ### Requirement: Dlib Model Provisioning
 
@@ -127,4 +127,3 @@ The project SHALL provide a single canonical template set for install-time asset
 - **WHEN** the asset generator or check script runs
 - **THEN** it writes `build/package/assets/etc/chissu-pam/config.toml` (and any related snippets) from the same template used by the installer
 - **AND** drift detection fails (non-zero) if committed assets diverge from the template source.
-

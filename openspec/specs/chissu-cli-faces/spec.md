@@ -103,7 +103,7 @@ The removal flow MUST reuse the encrypted store format and Secret Service key so
 The CLI MUST expose a top-level `chissu-cli enroll` command that captures an infrared frame using the same configuration/default order defined in the `chissu-cli-capture` capability, runs face detection + embedding extraction, and immediately reuses the encrypted enrollment flow without requiring intermediate embedding files.
 
 #### Scenario: End-to-end capture, extract, and enroll
-- **GIVEN** `/etc/chissu-pam/config.toml` defines `video_device = "/dev/video2"`, `pixel_format = "Y16"`, and `embedding_store_dir = "/srv/chissu/models"` (or the legacy `descriptor_store_dir`)
+- **GIVEN** `/etc/chissu-pam/config.toml` defines `video_device = "/dev/video2"`, `pixel_format = "Y16"`, and `embedding_store_dir = "/srv/chissu/embeddings"` (or the legacy `descriptor_store_dir`)
 - **AND** the operator has dlib landmark/encoder model paths available via flags or environment variables
 - **WHEN** they run `chissu-cli enroll --json`
 - **THEN** the command loads the config, captures a frame using the shared defaults (honoring warm-up frames), detects faces, and encodes embeddings using the same logic as `faces extract`
@@ -123,4 +123,3 @@ The automated enrollment command MUST infer the target user from the invoking Un
 #### Scenario: Non-root override is rejected
 - **WHEN** a non-root user runs `chissu-cli enroll --user bob`
 - **THEN** the command fails validation before any capture occurs, explaining that only root may override the user, and it exits with a non-zero status without touching any store files.
-
