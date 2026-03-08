@@ -60,7 +60,7 @@ The installer SHALL create the standard configuration and data directories, seed
 #### Scenario: Data directories created with restrictive modes
 
 - **WHEN** the installer prepares state directories
-- **THEN** it ensures `/etc/chissu-pam/`, `/usr/local/etc/chissu-pam/`, `/var/lib/chissu-pam/embeddings`, and `/var/lib/chissu-pam/dlib-models` exist with owner `root:root` (or configurable) and modes no more permissive than `0755` for directories and `0644` for files.
+- **THEN** it ensures `/etc/chissu-pam/`, `/usr/local/etc/chissu-pam/`, `/var/lib/chissu-pam/embeddings`, and `/var/lib/chissu-pam/dlib-models` exist with owner `root:root` (or configurable), with `/etc/chissu-pam/`, `/usr/local/etc/chissu-pam/`, and `/var/lib/chissu-pam/dlib-models` having modes no more permissive than `0755`, `/var/lib/chissu-pam/embeddings` created with mode `01733` (sticky bit set to allow unprivileged enrollment while restricting deletion to owners), and files in these directories having modes no more permissive than `0644`.
 
 ### Requirement: Dlib Model Provisioning
 
