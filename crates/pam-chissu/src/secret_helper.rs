@@ -11,7 +11,9 @@ use chissu_face_core::secret_service::{
 };
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
-use nix::unistd::{fork, initgroups, setgid, setuid, ForkResult, Pid, User};
+use nix::unistd::{
+    fork, getegid, geteuid, initgroups, setgid, setuid, ForkResult, Gid, Pid, Uid, User,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -23,7 +25,55 @@ pub enum HelperResponse {
 #[derive(Debug)]
 pub enum HelperError {
     SecretServiceUnavailable(String),
+    PrivilegeDrop(PrivilegeDropFailure),
     IpcFailure(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrivilegeDropFailure {
+    stage: PrivilegeDropStage,
+    message: String,
+    errno: Option<i32>,
+}
+
+impl PrivilegeDropFailure {
+    pub(crate) fn new(stage: PrivilegeDropStage, message: String, errno: Option<i32>) -> Self {
+        Self {
+            stage,
+            message,
+            errno,
+        }
+    }
+
+    pub fn stage(&self) -> PrivilegeDropStage {
+        self.stage
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn errno(&self) -> Option<i32> {
+        self.errno
+    }
+
+    pub fn is_eperm(&self) -> bool {
+        self.errno == Some(libc::EPERM)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivilegeDropStage {
+    Initgroups,
+    Setgid,
+    Setuid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrivilegeDropPlan {
+    Skip,
+    Switch,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -87,10 +137,15 @@ fn child_entry(
         apply_env_overrides(overrides);
     }
 
-    if let Err(message) = drop_privileges(&user) {
+    if let Err(failure) = drop_privileges(&user) {
         emit_and_exit(
             &mut stream,
-            HelperWireMessage::error(HelperWireErrorKind::IpcFailure, &message),
+            HelperWireMessage::Error {
+                kind: HelperWireErrorKind::PrivilegeDrop,
+                message: failure.message().into(),
+                stage: Some(failure.stage()),
+                errno: failure.errno(),
+            },
         );
     }
 
@@ -119,6 +174,8 @@ fn child_entry(
                 HelperWireMessage::Error {
                     kind: HelperWireErrorKind::SecretServiceUnavailable,
                     message: err.to_string(),
+                    stage: None,
+                    errno: None,
                 },
             );
         }
@@ -128,19 +185,59 @@ fn child_entry(
                 HelperWireMessage::Error {
                     kind: HelperWireErrorKind::InvalidKey,
                     message: reason,
+                    stage: None,
+                    errno: None,
                 },
             );
         }
     }
 }
 
-fn drop_privileges(user: &User) -> Result<(), String> {
-    let name = CString::new(user.name.clone())
-        .map_err(|err| format!("failed to prepare username for initgroups: {err}"))?;
-    initgroups(&name, user.gid).map_err(|err| err.to_string())?;
-    setgid(user.gid).map_err(|err| err.to_string())?;
-    setuid(user.uid).map_err(|err| err.to_string())?;
+fn drop_privileges(user: &User) -> Result<(), PrivilegeDropFailure> {
+    if privilege_drop_plan(user.uid, user.gid, geteuid(), getegid()) == PrivilegeDropPlan::Skip {
+        return Ok(());
+    }
+
+    let name = CString::new(user.name.clone()).map_err(|err| {
+        PrivilegeDropFailure::new(PrivilegeDropStage::Initgroups, err.to_string(), None)
+    })?;
+    if geteuid().is_root() {
+        initgroups(&name, user.gid).map_err(|err| {
+            PrivilegeDropFailure::new(
+                PrivilegeDropStage::Initgroups,
+                format!("privilege drop failed at initgroups: {err}"),
+                Some(err as i32),
+            )
+        })?;
+    }
+    setgid(user.gid).map_err(|err| {
+        PrivilegeDropFailure::new(
+            PrivilegeDropStage::Setgid,
+            format!("privilege drop failed at setgid: {err}"),
+            (err as i32 != 0).then_some(err as i32),
+        )
+    })?;
+    setuid(user.uid).map_err(|err| {
+        PrivilegeDropFailure::new(
+            PrivilegeDropStage::Setuid,
+            format!("privilege drop failed at setuid: {err}"),
+            (err as i32 != 0).then_some(err as i32),
+        )
+    })?;
     Ok(())
+}
+
+fn privilege_drop_plan(
+    target_uid: Uid,
+    target_gid: Gid,
+    current_uid: Uid,
+    current_gid: Gid,
+) -> PrivilegeDropPlan {
+    if current_uid == target_uid && current_gid == target_gid {
+        PrivilegeDropPlan::Skip
+    } else {
+        PrivilegeDropPlan::Switch
+    }
 }
 
 fn emit_and_exit(stream: &mut UnixStream, payload: HelperWireMessage) -> ! {
@@ -237,7 +334,18 @@ fn translate_message(msg: HelperWireMessage) -> Result<HelperResponse, HelperErr
         HelperWireMessage::Error {
             kind: HelperWireErrorKind::SecretServiceUnavailable,
             message,
+            ..
         } => Err(HelperError::SecretServiceUnavailable(message)),
+        HelperWireMessage::Error {
+            kind: HelperWireErrorKind::PrivilegeDrop,
+            message,
+            stage,
+            errno,
+        } => Err(HelperError::PrivilegeDrop(PrivilegeDropFailure::new(
+            stage.unwrap_or(PrivilegeDropStage::Setuid),
+            message,
+            errno,
+        ))),
         HelperWireMessage::Error { message, .. } => Err(HelperError::IpcFailure(message)),
     }
 }
@@ -255,22 +363,18 @@ enum HelperWireMessage {
     Error {
         kind: HelperWireErrorKind,
         message: String,
+        #[serde(default)]
+        stage: Option<PrivilegeDropStage>,
+        #[serde(default)]
+        errno: Option<i32>,
     },
-}
-
-impl HelperWireMessage {
-    fn error(kind: HelperWireErrorKind, message: &str) -> Self {
-        HelperWireMessage::Error {
-            kind,
-            message: message.into(),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum HelperWireErrorKind {
     SecretServiceUnavailable,
+    PrivilegeDrop,
     InvalidKey,
     IpcFailure,
 }
@@ -309,12 +413,54 @@ mod tests {
         let err = translate_message(HelperWireMessage::Error {
             kind: HelperWireErrorKind::SecretServiceUnavailable,
             message: "locked".into(),
+            stage: None,
+            errno: None,
         })
         .unwrap_err();
         match err {
             HelperError::SecretServiceUnavailable(message) => assert_eq!(message, "locked"),
             _ => panic!("expected secret service error"),
         }
+    }
+
+    #[test]
+    fn translate_message_maps_privilege_drop_error() {
+        let err = translate_message(HelperWireMessage::Error {
+            kind: HelperWireErrorKind::PrivilegeDrop,
+            message: "privilege drop failed at setuid: EPERM: Operation not permitted".into(),
+            stage: Some(PrivilegeDropStage::Setuid),
+            errno: Some(libc::EPERM),
+        })
+        .unwrap_err();
+        match err {
+            HelperError::PrivilegeDrop(failure) => {
+                assert_eq!(failure.stage(), PrivilegeDropStage::Setuid);
+                assert!(failure.is_eperm());
+            }
+            _ => panic!("expected privilege drop error"),
+        }
+    }
+
+    #[test]
+    fn privilege_drop_plan_skips_when_already_target_user() {
+        let plan = privilege_drop_plan(
+            Uid::from_raw(1000),
+            Gid::from_raw(1000),
+            Uid::from_raw(1000),
+            Gid::from_raw(1000),
+        );
+        assert_eq!(plan, PrivilegeDropPlan::Skip);
+    }
+
+    #[test]
+    fn privilege_drop_plan_switches_when_identity_differs() {
+        let plan = privilege_drop_plan(
+            Uid::from_raw(1000),
+            Gid::from_raw(1000),
+            Uid::from_raw(0),
+            Gid::from_raw(0),
+        );
+        assert_eq!(plan, PrivilegeDropPlan::Switch);
     }
 
     #[test]

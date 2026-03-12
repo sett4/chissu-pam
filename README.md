@@ -238,6 +238,8 @@ To roll back just the PAM wiring, run `sudo scripts/install-chissu.sh --uninstal
 
 Successful hydration emits `Recovered session environment from logind for user 'alice': session=3 tty=tty2 seat=seat0 type=wayland ...` in syslog. If you instead see `No active logind session for user 'alice' (tty hint tty2)` the PAM stack will fall back to passwords until that desktop session is running/unlocked.
 
+Desktop unlock services such as `cinnamon-screensaver` may invoke PAM from a context that cannot perform `setuid`/`setgid` again. When that happens, `pam_chissu` now logs the failing privilege-drop stage and intentionally falls back to password authentication instead of aborting the entire unlock flow.
+
 ## Workspace layout
 
 ```
@@ -314,7 +316,7 @@ The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Li
   - `require_secret_service = false`
 - Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissu` or `journalctl SYSLOG_IDENTIFIER=pam_chissu`.
 - Interactive PAM conversations mirror those events on the terminal: successful matches trigger a `PAM_TEXT_INFO` banner, while retries and failures emit `PAM_ERROR_MSG` guidance ("stay in frame", "no embeddings", etc.) so operators see immediate feedback even without tailing syslog.
-- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM embedding key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no embeddings" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable so downstream modules can continue handling the login.
+- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM embedding key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no embeddings" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable or privilege-dropping is denied so downstream modules can continue handling the login.
 - Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the helper inside PAM; it defaults to `false` so you can opt in once the desktop session exposes Secret Service. Store a 32-byte AES-GCM embedding key (Base64-encoded) under `service=chissu-pam` and `user=<pam user>` so the helper can unlock embedding files during authentication.
 - The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
 
