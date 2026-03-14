@@ -3,12 +3,15 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: build/package-deb.sh --distro <debian|ubuntu> [--version <semver>] [--arch <arch>] [--revision <n>] [--skip-build]
+Usage: build/package-deb.sh --distro <debian|ubuntu> [--suite <suite>] [--artifact-label <label>] [--version <semver>] [--arch <arch>] [--revision <n>] [--skip-build]
 
 Build the chissu-pam Debian/Ubuntu package using dpkg-buildpackage.
 
 Options:
   --distro <name>   Target distribution slug (debian or ubuntu).
+  --suite <name>    Target Debian/Ubuntu suite or codename for changelog metadata.
+  --artifact-label <label>
+                    Release label embedded in the output filename (for example ubuntu-24.04).
   --version <ver>   Override the package version (defaults to workspace version).
   --arch <arch>     Target architecture (default: amd64).
   --revision <n>    Debian revision suffix (default: 1).
@@ -26,6 +29,8 @@ LIB_PATH="$REPO_ROOT/scripts/lib/install_common.sh"
 PKG_NAME="chissu-pam"
 PAM_DEST_REL="usr/lib/x86_64-linux-gnu/security"
 DISTRO=""
+SUITE=""
+ARTIFACT_LABEL=""
 VERSION=""
 ARCH="amd64"
 REVISION="1"
@@ -48,6 +53,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --version)
       VERSION="$2"
+      shift 2
+      ;;
+    --suite)
+      SUITE="$2"
+      shift 2
+      ;;
+    --artifact-label)
+      ARTIFACT_LABEL="$2"
       shift 2
       ;;
     --arch)
@@ -85,6 +98,26 @@ if [[ "$DISTRO" != "debian" && "$DISTRO" != "ubuntu" ]]; then
   exit 1
 fi
 
+detect_host_release_label() {
+  local expected_distro="$1"
+  local os_id="" version_id=""
+
+  if [[ ! -r /etc/os-release ]]; then
+    return 1
+  fi
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  os_id="${ID:-}"
+  version_id="${VERSION_ID:-}"
+
+  if [[ "$os_id" != "$expected_distro" || -z "$version_id" ]]; then
+    return 1
+  fi
+
+  printf '%s-%s\n' "$expected_distro" "$version_id"
+}
+
 if [[ -z "$VERSION" ]]; then
   VERSION=$(awk -F'"' '
     /^\[workspace\.package\]/ { in_block=1; next }
@@ -98,10 +131,24 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-MAINTAINER="${CHISSU_PAM_MAINTAINER:-sett4 <noreply@example.org>}"
+if [[ -z "$SUITE" ]]; then
+  SUITE="$DISTRO"
+fi
+
+if [[ -z "$ARTIFACT_LABEL" ]]; then
+  if ! ARTIFACT_LABEL="$(detect_host_release_label "$DISTRO")"; then
+    if [[ "$SUITE" == "$DISTRO" ]]; then
+      ARTIFACT_LABEL="$DISTRO"
+    else
+      ARTIFACT_LABEL="${DISTRO}-${SUITE}"
+    fi
+  fi
+fi
+
+MAINTAINER="${CHISSU_PAM_MAINTAINER:-Chissu Maintainers <ops@chissu.dev>}"
 DATERFC=$(date -R)
 DEB_VERSION="${VERSION}-${REVISION}"
-WORK_ROOT="$REPO_ROOT/build/package/work/$DISTRO"
+WORK_ROOT="$REPO_ROOT/build/package/work/$ARTIFACT_LABEL"
 SRC_DIR="$WORK_ROOT/${PKG_NAME}-${VERSION}"
 DEBIAN_TEMPLATE_DIR="$REPO_ROOT/build/package/debian"
 DEBIAN_DIR="$SRC_DIR/debian"
@@ -152,15 +199,15 @@ escape_sed() {
 copy_template() {
   local template="$1"
   local dest="$2"
-  local maint_escaped date_escaped debver_escaped version_escaped arch_escaped distro_escaped
+  local maint_escaped date_escaped debver_escaped version_escaped arch_escaped suite_escaped
   maint_escaped=$(escape_sed "$MAINTAINER")
   date_escaped=$(escape_sed "$DATERFC")
   debver_escaped=$(escape_sed "$DEB_VERSION")
   version_escaped=$(escape_sed "$VERSION")
   arch_escaped=$(escape_sed "$ARCH")
-  distro_escaped=$(escape_sed "$DISTRO")
+  suite_escaped=$(escape_sed "$SUITE")
   sed \
-    -e "s/__DISTRO__/$distro_escaped/g" \
+    -e "s/__DISTRO__/$suite_escaped/g" \
     -e "s/__VERSION__/$version_escaped/g" \
     -e "s/__DEB_VERSION__/$debver_escaped/g" \
     -e "s/__ARCH__/$arch_escaped/g" \
@@ -219,7 +266,7 @@ if [[ -z "$DEB_OUTPUT" ]]; then
   exit 1
 fi
 
-FINAL_NAME="$DIST_DIR/${PKG_NAME}_${VERSION}_${DISTRO}_${ARCH}.deb"
+FINAL_NAME="$DIST_DIR/${PKG_NAME}_${VERSION}_${ARTIFACT_LABEL}_${ARCH}.deb"
 log "Copying $(basename "$DEB_OUTPUT") -> $(basename "$FINAL_NAME")"
 cp "$DEB_OUTPUT" "$FINAL_NAME"
 log "Done: $FINAL_NAME"

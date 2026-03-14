@@ -59,15 +59,17 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 1. **Build the package** (requires `debhelper`, `dpkg-dev`, and `curl`):
 
    ```bash
-   build/package-deb.sh --distro debian   # or --distro ubuntu
+   build/package-deb.sh --distro debian
+   build/package-deb.sh --distro ubuntu
    ```
 
-   Pass `--version` to override the detected workspace version or `--arch` for non-`amd64` builds. Artifacts land in `dist/chissu-pam_<version>_<distro>_amd64.deb`.
+   Pass `--version` to override the detected workspace version or `--arch` for non-`amd64` builds. When building on a native Debian/Ubuntu host, the artifact name auto-detects the release and lands in `dist/chissu-pam_<version>_<distro>-<release>_amd64.deb` such as `chissu-pam_0.6.0-rc3_ubuntu-25.10_amd64.deb`.
+   When cross-building inside a container, pass `--suite <codename>` plus `--artifact-label <distro-release>` explicitly, for example `--suite noble --artifact-label ubuntu-24.04`.
 
 2. **Install the package**:
 
    ```bash
-   sudo dpkg -i dist/chissu-pam_0.3.0_debian_amd64.deb
+   sudo dpkg -i dist/chissu-pam_0.3.0_debian-12_amd64.deb
    ```
 
    The CLI binary, PAM module, default config, and doc snippets are placed under the standard system paths.
@@ -79,9 +81,9 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 #### Automated releases
 
 - Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` or `v<MAJOR>.<MINOR>.<PATCH>-<prerelease>` (for example `git tag v0.3.0 && git push origin v0.3.0` or `git tag v0.3.0-rc1 && git push origin v0.3.0-rc1`).
-- The `Release Packages` workflow builds both Debian and Ubuntu `.deb` files via `build/package-deb.sh` and Fedora `.rpm` files via `build/package-rpm.sh`, using the tag without the leading `v` as the package version.
+- The `Release Packages` workflow builds release-specific `.deb` files inside Debian/Ubuntu container images and publishes Debian 12, Ubuntu 24.04, Ubuntu 25.10, plus Fedora RPM assets for the same tag.
 - For RPM prereleases, the generated artifact name keeps the original semver, but the spec normalizes it internally to `Version=<core>` and `Release=0.<release>.<prerelease>` so `rpmbuild` accepts RC tags and upgrade ordering remains correct.
-- When the workflow finishes, GitHub Releases contains `chissu-pam_<version>_debian_amd64.deb`, `chissu-pam_<version>_ubuntu_amd64.deb`, and `chissu-pam_<version>_<distro>_x86_64.rpm` assets attached to that tag. Release notes are auto-generated; edit them manually if more detail is needed.
+- When the workflow finishes, GitHub Releases contains assets such as `chissu-pam_<version>_debian-12_amd64.deb`, `chissu-pam_<version>_ubuntu-24.04_amd64.deb`, `chissu-pam_<version>_ubuntu-25.10_amd64.deb`, and `chissu-pam_<version>_<distro>_x86_64.rpm`. Release notes are auto-generated; edit them manually if more detail is needed.
 - If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
 
 #### RPM packages (Fedora/RHEL)
