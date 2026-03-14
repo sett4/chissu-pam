@@ -6,7 +6,7 @@ Release:        __RELEASE__%{?dist}
 Summary:        Infrared-ready facial authentication CLI + PAM helper
 
 License:        LGPL-2.1+
-URL:            https://github.com/sett/chissu-pam
+URL:            https://github.com/sett4/chissu-pam
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      __ARCH__
 Requires:       dlib, openblas, lapack, gtk3, systemd-libs, curl, bzip2, authselect
@@ -25,7 +25,7 @@ enroll embeddings and wire PAM stacks without compiling from source.
 %install
 rm -rf "%{buildroot}"
 mkdir -p "%{buildroot}"
-cp -pr artifacts/* "%{buildroot}/"
+cp -a artifacts/. "%{buildroot}/"
 
 %files
 %license LICENSE

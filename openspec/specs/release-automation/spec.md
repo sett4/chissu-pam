@@ -4,10 +4,10 @@
 TBD - created by archiving change add-release-deb-workflow. Update Purpose after archive.
 ## Requirements
 ### Requirement: Tag-triggered Deb Packages
-GitHub Actions MUST produce Debian-compatible packages whenever a semver tag is pushed.
+GitHub Actions MUST produce Debian-compatible packages whenever a supported semver tag is pushed.
 
 #### Scenario: Tag push builds packages
-- **GIVEN** a tag named `v1.2.3` (pattern `v<major>.<minor>.<patch>`) is pushed to the repository
+- **GIVEN** a tag named `v1.2.3` or `v1.2.3-rc1` (pattern `v<major>.<minor>.<patch>[-<prerelease>]`) is pushed to the repository
 - **THEN** a workflow runs on `ubuntu-latest`, checks out the code, installs packaging dependencies (`debhelper`, `dpkg-dev`, `curl`, `bzip2`, etc.), ensures `CARGO_HOME="$(pwd)/.cargo-home"`, and invokes `build/package-deb.sh --distro debian` and `--distro ubuntu`
 - **AND** the workflow archives the resulting `.deb` artifacts from `dist/`
 
@@ -25,14 +25,15 @@ Maintainers MUST have documentation explaining how to trigger and verify the aut
 
 #### Scenario: README describes tagging flow
 - **WHEN** a maintainer reads the release section
-- **THEN** they learn to push a `v<MAJOR>.<MINOR>.<PATCH>` tag, wait for the workflow, and confirm `.deb` assets on GitHub Releases, including notes about required permissions and how to re-run a failed job.
+- **THEN** they learn to push a `v<MAJOR>.<MINOR>.<PATCH>` or `v<MAJOR>.<MINOR>.<PATCH>-<prerelease>` tag, wait for the workflow, and confirm `.deb`/`.rpm` assets on GitHub Releases, including notes about required permissions and how to re-run a failed job.
 
 ### Requirement: Tag-triggered RPM Packages
-The GitHub Actions release workflow MUST produce RPM artifacts whenever a `v<MAJOR>.<MINOR>.<PATCH>` tag is pushed.
+The GitHub Actions release workflow MUST produce RPM artifacts whenever a supported semver tag is pushed.
 
 #### Scenario: Tag push builds RPMs
-- **WHEN** the release workflow runs for tag `v1.2.3`
+- **WHEN** the release workflow runs for tag `v1.2.3` or `v1.2.3-rc1`
 - **THEN** it installs the necessary RPM tooling (`rpm-build`, `createrepo_c`, etc.) and executes `build/package-rpm.sh` for each supported distro, storing the resulting `.rpm` files under `dist/`
+- **AND** prerelease tags are normalized for RPM metadata by storing the core semver in `Version` and moving the prerelease label into `Release`
 - **AND** failures building the RPM cause the workflow to fail so releases are never missing RPM assets silently
 
 ### Requirement: RPM Release Assets
@@ -42,4 +43,3 @@ GitHub Releases MUST include the RPM artifacts beside the `.deb` files.
 - **WHEN** the workflow publishes assets for tag `v1.2.3`
 - **THEN** it uploads each generated `.rpm` file (e.g., `chissu-pam-1.2.3.fedora.x86_64.rpm`) to the tag’s GitHub Release via the same step that publishes `.deb` files
 - **AND** the workflow surfaces an error if any `.rpm` upload fails so maintainers can rerun the job
-

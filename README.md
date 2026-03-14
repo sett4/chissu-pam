@@ -78,8 +78,9 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
 
 #### Automated releases
 
-- Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` (for example `git tag v0.3.0 && git push origin v0.3.0`).
-- The `Release Debian Packages` workflow builds both Debian and Ubuntu `.deb` files via `build/package-deb.sh`, using the numeric portion of the tag as the package version.
+- Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` or `v<MAJOR>.<MINOR>.<PATCH>-<prerelease>` (for example `git tag v0.3.0 && git push origin v0.3.0` or `git tag v0.3.0-rc1 && git push origin v0.3.0-rc1`).
+- The `Release Packages` workflow builds both Debian and Ubuntu `.deb` files via `build/package-deb.sh` and Fedora `.rpm` files via `build/package-rpm.sh`, using the tag without the leading `v` as the package version.
+- For RPM prereleases, the generated artifact name keeps the original semver, but the spec normalizes it internally to `Version=<core>` and `Release=0.<release>.<prerelease>` so `rpmbuild` accepts RC tags and upgrade ordering remains correct.
 - When the workflow finishes, GitHub Releases contains `chissu-pam_<version>_debian_amd64.deb`, `chissu-pam_<version>_ubuntu_amd64.deb`, and `chissu-pam_<version>_<distro>_x86_64.rpm` assets attached to that tag. Release notes are auto-generated; edit them manually if more detail is needed.
 - If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
 

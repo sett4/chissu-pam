@@ -12,6 +12,11 @@ The repository MUST ship a helper that produces RPM packages via the standard `r
 - **AND** it renders a `.spec` file plus `%post`/`%postun` hooks, then invokes `rpmbuild -bb` so that an `.rpm` is emitted into `dist/` with the distro + architecture encoded in the filename (e.g., `chissu-pam-<version>.<distro>.x86_64.rpm`)
 - **AND** runtime dependencies include `dlib`, `openblas`, `lapack`, `gtk3`, `libudev`, `curl`, and `bzip2`
 
+#### Scenario: Maintainer builds prerelease RPM package
+- **GIVEN** a maintainer runs `build/package-rpm.sh --distro fedora --version 1.2.3-rc1`
+- **THEN** the generated RPM metadata uses `Version: 1.2.3`
+- **AND** it encodes the prerelease label in `Release` as `0.<release>.rc1` so the build is valid and upgrades cleanly to the final `1.2.3` package
+
 ### Requirement: Install-Time Model Download
 RPM packages MUST avoid bundling the dlib weights and instead download them during installation.
 
@@ -51,5 +56,5 @@ The RPM packaging workflow SHALL consume the shared installer templates/library 
 #### Scenario: RPM build pulls shared config and hooks
 - **WHEN** `build/package-rpm.sh` stages package files
 - **THEN** it copies the generated config template and any shared hook scripts from the common asset output
+- **AND** it preserves dotfiles such as placeholder `.keep` entries when copying staged assets into `%{buildroot}`
 - **AND** it does not re-define prerequisite package lists or dlib download URLs independently (it reuses the shared library/templates).
-

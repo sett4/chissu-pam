@@ -98,7 +98,7 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-MAINTAINER="${CHISSU_PAM_MAINTAINER:-Chissu Maintainers https://github/sett4/chissu-pam}"
+MAINTAINER="${CHISSU_PAM_MAINTAINER:-sett4 <noreply@example.org>}"
 DATERFC=$(date -R)
 DEB_VERSION="${VERSION}-${REVISION}"
 WORK_ROOT="$REPO_ROOT/build/package/work/$DISTRO"

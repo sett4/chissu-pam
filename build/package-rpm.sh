@@ -25,6 +25,8 @@ VERSION=""
 RELEASE="1"
 ARCH="x86_64"
 SKIP_BUILD=0
+RPM_VERSION=""
+RPM_RELEASE=""
 if [[ ! -f "$LIB_PATH" ]]; then
   echo "Missing shared installer library at $LIB_PATH" >&2
   exit 1
@@ -88,11 +90,34 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-command -v rpmbuild >/dev/null || { echo "rpmbuild not found" >&2; exit 1; }
-
 log() {
   echo "[package-rpm] $*"
 }
+
+normalize_rpm_version() {
+  local input="$1"
+  local core prerelease
+
+  if [[ "$input" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.]+))?$ ]]; then
+    core="${BASH_REMATCH[1]}"
+    prerelease="${BASH_REMATCH[3]:-}"
+  else
+    echo "Unsupported version format for RPM packaging: $input" >&2
+    echo "Expected <major>.<minor>.<patch> or <major>.<minor>.<patch>-<prerelease>" >&2
+    exit 1
+  fi
+
+  RPM_VERSION="$core"
+  if [[ -n "$prerelease" ]]; then
+    RPM_RELEASE="0.${RELEASE}.${prerelease}"
+  else
+    RPM_RELEASE="$RELEASE"
+  fi
+}
+
+normalize_rpm_version "$VERSION"
+
+command -v rpmbuild >/dev/null || { echo "rpmbuild not found" >&2; exit 1; }
 
 require_build_deps() {
   missing=()
@@ -167,8 +192,8 @@ cp "$REPO_ROOT/LICENSE" "$STAGING_ROOT/LICENSE"
 
 log "Rendering spec"
 sed \
-  -e "s/__VERSION__/$VERSION/g" \
-  -e "s/__RELEASE__/$RELEASE/g" \
+  -e "s/__VERSION__/$RPM_VERSION/g" \
+  -e "s/__RELEASE__/$RPM_RELEASE/g" \
   -e "s/__ARCH__/$ARCH/g" \
   "$SPEC_TEMPLATE" > "$SPEC_PATH"
 
