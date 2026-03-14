@@ -27,6 +27,8 @@ ARCH="x86_64"
 SKIP_BUILD=0
 RPM_VERSION=""
 RPM_RELEASE=""
+RPM_SOURCE_BASENAME=""
+RPM_CHANGELOG_DATE=""
 if [[ ! -f "$LIB_PATH" ]]; then
   echo "Missing shared installer library at $LIB_PATH" >&2
   exit 1
@@ -113,6 +115,8 @@ normalize_rpm_version() {
   else
     RPM_RELEASE="$RELEASE"
   fi
+  RPM_SOURCE_BASENAME="chissu-pam-${RPM_VERSION}"
+  RPM_CHANGELOG_DATE="$(LC_ALL=C date '+%a %b %d %Y')"
 }
 
 normalize_rpm_version "$VERSION"
@@ -160,7 +164,7 @@ if [[ ! -f "$BIN_SRC" || ! -f "$PAM_SRC" ]]; then
 fi
 
 WORK_ROOT="$REPO_ROOT/build/package/rpm/work/$DISTRO"
-STAGING_ROOT="$WORK_ROOT/chissu-pam-$VERSION"
+STAGING_ROOT="$WORK_ROOT/$RPM_SOURCE_BASENAME"
 ARTIFACT_DIR="$STAGING_ROOT/artifacts"
 RPMS_DIR="$WORK_ROOT/rpmbuild"
 SPEC_TEMPLATE="$REPO_ROOT/build/package/rpm/chissu-pam.spec.in"
@@ -195,10 +199,11 @@ sed \
   -e "s/__VERSION__/$RPM_VERSION/g" \
   -e "s/__RELEASE__/$RPM_RELEASE/g" \
   -e "s/__ARCH__/$ARCH/g" \
+  -e "s/__CHANGELOG_DATE__/$RPM_CHANGELOG_DATE/g" \
   "$SPEC_TEMPLATE" > "$SPEC_PATH"
 
 log "Creating source tarball"
-tar -C "$WORK_ROOT" -czf "$RPMS_DIR/SOURCES/chissu-pam-$VERSION.tar.gz" "chissu-pam-$VERSION"
+tar -C "$WORK_ROOT" -czf "$RPMS_DIR/SOURCES/${RPM_SOURCE_BASENAME}.tar.gz" "$RPM_SOURCE_BASENAME"
 
 log "Running rpmbuild"
 rpmbuild --define "_topdir $RPMS_DIR" -bb "$SPEC_PATH"
