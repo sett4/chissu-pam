@@ -147,16 +147,43 @@ fi
 
 MAINTAINER="${CHISSU_PAM_MAINTAINER:-Chissu Maintainers <ops@chissu.dev>}"
 DATERFC=$(date -R)
-DEB_VERSION="${VERSION}-${REVISION}"
 WORK_ROOT="$REPO_ROOT/build/package/work/$ARTIFACT_LABEL"
 SRC_DIR="$WORK_ROOT/${PKG_NAME}-${VERSION}"
 DEBIAN_TEMPLATE_DIR="$REPO_ROOT/build/package/debian"
 DEBIAN_DIR="$SRC_DIR/debian"
 ARTIFACT_DIR="$SRC_DIR/artifacts"
 DIST_DIR="$REPO_ROOT/dist"
+SOURCE_FORMAT_FILE="$DEBIAN_TEMPLATE_DIR/source/format"
 
 log() {
   echo "[package-deb] $*"
+}
+
+normalize_deb_upstream_version() {
+  if [[ "$VERSION" == *-* ]]; then
+    printf '%s~%s\n' "${VERSION%%-*}" "${VERSION#*-}"
+    return 0
+  fi
+
+  printf '%s\n' "$VERSION"
+}
+
+resolve_deb_version() {
+  local source_format=""
+  local upstream_version=""
+
+  upstream_version="$(normalize_deb_upstream_version)"
+
+  if [[ -r "$SOURCE_FORMAT_FILE" ]]; then
+    source_format="$(<"$SOURCE_FORMAT_FILE")"
+  fi
+
+  if [[ "$source_format" == *"(native)"* ]]; then
+    printf '%s\n' "$upstream_version"
+    return 0
+  fi
+
+  printf '%s-%s\n' "$upstream_version" "$REVISION"
 }
 
 command -v dpkg-buildpackage >/dev/null || { echo "dpkg-buildpackage not found" >&2; exit 1; }
@@ -188,6 +215,8 @@ else
 fi
 
 "$REPO_ROOT/scripts/render-install-assets.sh"
+
+DEB_VERSION="$(resolve_deb_version)"
 
 rm -rf "$WORK_ROOT"
 mkdir -p "$DEBIAN_DIR" "$ARTIFACT_DIR" "$DIST_DIR"

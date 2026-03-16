@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     debhelper \
     dpkg-dev \
     devscripts \
+    rustc \
+    cargo \
     curl \
     bzip2 \
     ca-certificates \
