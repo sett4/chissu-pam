@@ -6,14 +6,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:${PATH}
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libclang-dev \
     libdlib-dev \
     libopenblas-dev \
     liblapack-dev \
-    libatlas-base-dev \
     libgtk-3-dev \
     libudev-dev \
     libpam0g-dev \

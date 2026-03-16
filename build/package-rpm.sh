@@ -123,6 +123,20 @@ normalize_rpm_version "$VERSION"
 
 command -v rpmbuild >/dev/null || { echo "rpmbuild not found" >&2; exit 1; }
 
+WORK_ROOT_BASE="${TMPDIR:-/tmp}/chissu-pam-rpm-work"
+mkdir -p "$WORK_ROOT_BASE"
+WORK_ROOT="$(mktemp -d "$WORK_ROOT_BASE/${DISTRO}.XXXXXX")"
+STAGING_ROOT="$WORK_ROOT/$RPM_SOURCE_BASENAME"
+ARTIFACT_DIR="$STAGING_ROOT/artifacts"
+RPMS_DIR="$WORK_ROOT/rpmbuild"
+SPEC_TEMPLATE="$REPO_ROOT/build/package/rpm/chissu-pam.spec.in"
+SPEC_PATH="$RPMS_DIR/SPECS/chissu-pam.spec"
+DIST_DIR="$REPO_ROOT/dist"
+
+mkdir -p "$STAGING_ROOT" "$ARTIFACT_DIR"
+mkdir -p "$RPMS_DIR"/{BUILD,BUILDROOT,RPMS,SRPMS,SPECS,SOURCES}
+mkdir -p "$DIST_DIR"
+
 require_build_deps() {
   missing=()
   for pkg in "${BUILD_DEPS[@]}"; do
@@ -148,6 +162,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \
+    CARGO_TARGET_DIR="$WORK_ROOT/cargo-target" \
     cargo build --release -p chissu-cli -p pam-chissu
   popd >/dev/null
 else
@@ -156,25 +171,13 @@ fi
 
 "$REPO_ROOT/scripts/render-install-assets.sh"
 
-BIN_SRC="$REPO_ROOT/target/release/chissu-cli"
-PAM_SRC="$REPO_ROOT/target/release/libpam_chissu.so"
+CARGO_BUILD_DIR="$WORK_ROOT/cargo-target"
+BIN_SRC="$CARGO_BUILD_DIR/release/chissu-cli"
+PAM_SRC="$CARGO_BUILD_DIR/release/libpam_chissu.so"
 if [[ ! -f "$BIN_SRC" || ! -f "$PAM_SRC" ]]; then
   echo "Release binaries missing; run without --skip-build" >&2
   exit 1
 fi
-
-WORK_ROOT="$REPO_ROOT/build/package/rpm/work/$DISTRO"
-STAGING_ROOT="$WORK_ROOT/$RPM_SOURCE_BASENAME"
-ARTIFACT_DIR="$STAGING_ROOT/artifacts"
-RPMS_DIR="$WORK_ROOT/rpmbuild"
-SPEC_TEMPLATE="$REPO_ROOT/build/package/rpm/chissu-pam.spec.in"
-SPEC_PATH="$RPMS_DIR/SPECS/chissu-pam.spec"
-DIST_DIR="$REPO_ROOT/dist"
-
-rm -rf "$WORK_ROOT"
-mkdir -p "$STAGING_ROOT" "$ARTIFACT_DIR"
-mkdir -p "$RPMS_DIR"/{BUILD,BUILDROOT,RPMS,SRPMS,SPECS,SOURCES}
-mkdir -p "$DIST_DIR"
 
 log "Staging artifacts"
 mkdir -p "$ARTIFACT_DIR/usr/bin" \

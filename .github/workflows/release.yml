@@ -73,10 +73,26 @@ jobs:
       - name: Build RPM package
         env:
           TAG_NAME: ${{ github.ref_name }}
-          CARGO_HOME: ${{ github.workspace }}/.cargo-home
         run: |
           VERSION="${TAG_NAME#v}"
-          ./build/package-rpm.sh --distro fedora --version "$VERSION" --skip-build
+          if [[ -z "$VERSION" ]]; then
+            echo "Unable to derive version from tag $TAG_NAME" >&2
+            exit 1
+          fi
+
+          docker build \
+            --tag chissu-rpm-fedora \
+            -f build/package/rpm/Dockerfile \
+            .
+
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp/chissu-home \
+            -e CARGO_HOME=/workspace/.cargo-home \
+            -v "$PWD":/workspace \
+            -w /workspace \
+            chissu-rpm-fedora \
+            ./build/package-rpm.sh --distro fedora --version "$VERSION"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

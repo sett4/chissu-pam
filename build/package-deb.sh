@@ -189,6 +189,9 @@ resolve_deb_version() {
 command -v dpkg-buildpackage >/dev/null || { echo "dpkg-buildpackage not found" >&2; exit 1; }
 command -v dh >/dev/null || { echo "debhelper (dh) not found" >&2; exit 1; }
 
+rm -rf "$WORK_ROOT"
+mkdir -p "$DEBIAN_DIR" "$ARTIFACT_DIR" "$DIST_DIR"
+
 require_build_deps() {
   missing=()
   for pkg in "${BUILD_DEPS[@]}"; do
@@ -208,6 +211,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   log "Building release artifacts"
   pushd "$REPO_ROOT" >/dev/null
   CARGO_HOME="$REPO_ROOT/.cargo-home" \
+    CARGO_TARGET_DIR="$WORK_ROOT/cargo-target" \
     cargo build --release -p chissu-cli -p pam-chissu
   popd >/dev/null
 else
@@ -217,9 +221,6 @@ fi
 "$REPO_ROOT/scripts/render-install-assets.sh"
 
 DEB_VERSION="$(resolve_deb_version)"
-
-rm -rf "$WORK_ROOT"
-mkdir -p "$DEBIAN_DIR" "$ARTIFACT_DIR" "$DIST_DIR"
 
 escape_sed() {
   printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'
@@ -260,8 +261,9 @@ cp "$DEBIAN_TEMPLATE_DIR/source/format" "$DEBIAN_DIR/source/format"
 chmod 755 "$DEBIAN_DIR/rules" "$DEBIAN_DIR/postinst" "$DEBIAN_DIR/prerm" "$DEBIAN_DIR/postrm"
 
 log "Staging artifacts"
-BIN_SRC="$REPO_ROOT/target/release/chissu-cli"
-PAM_SRC="$REPO_ROOT/target/release/libpam_chissu.so"
+CARGO_BUILD_DIR="$WORK_ROOT/cargo-target"
+BIN_SRC="$CARGO_BUILD_DIR/release/chissu-cli"
+PAM_SRC="$CARGO_BUILD_DIR/release/libpam_chissu.so"
 if [[ ! -f "$BIN_SRC" || ! -f "$PAM_SRC" ]]; then
   echo "Expected release binaries missing; run without --skip-build" >&2
   exit 1

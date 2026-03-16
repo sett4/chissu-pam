@@ -40,7 +40,7 @@ Install the native dependencies on Debian/Ubuntu with:
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libclang-dev libdlib-dev libopenblas-dev liblapack-dev libatlas-base-dev libgtk-3-dev libudev-dev libpam0g-dev
+sudo apt install -y build-essential pkg-config libclang-dev libdlib-dev libopenblas-dev liblapack-dev libgtk-3-dev libudev-dev libpam0g-dev
 ```
 
 #### Download the dlib models
@@ -95,7 +95,7 @@ Download them from https://dlib.net/files/ once, then store them in a shared loc
    ```
 
    Add `--skip-build` if you've already produced release binaries via another step. Artifacts land in `dist/chissu-pam_<version>_<distro>_x86_64.rpm`.
-   Debian/Ubuntu's `libatlas-base-dev` does not map 1:1 on RedHat-family systems; this project uses `openblas-devel` plus `lapack-devel` there instead of a separate `atlas` package.
+   Debian/Ubuntu and RedHat-family systems both use OpenBLAS plus LAPACK here; no separate `atlas` package is required.
 
 2. **Install the package**:
 
