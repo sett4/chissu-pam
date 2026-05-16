@@ -95,7 +95,7 @@ struct V4lStream<'a> {
     stream: Stream<'a>,
 }
 
-impl<'a> CaptureStream for V4lStream<'a> {
+impl CaptureStream for V4lStream<'_> {
     fn next(&mut self) -> AppResult<Vec<u8>> {
         let (data, _) = self.stream.next().map_err(AppError::from)?;
         Ok(data.to_vec())

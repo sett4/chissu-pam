@@ -647,6 +647,7 @@ mod tests {
             capture_timeout_secs: None,
             frame_interval_millis: None,
             require_secret_service: None,
+            secret_service_session: None,
         };
         ResolvedConfig::from_raw(raw)
     }

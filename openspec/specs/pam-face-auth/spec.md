@@ -60,6 +60,19 @@ Secret Service probing MUST execute in a helper that can impersonate the target 
 - **THEN** it MUST query `org.freedesktop.login1` for the target user's active session, extract the session's `Display` value and runtime directory, and provide those values (plus a synthesized `unix:path=${XDG_RUNTIME_DIR}/bus` address) to the helper before it contacts Secret Service
 - **SO THAT** Secret Service lookups succeed even when PAM is invoked from `polkit-1` or other non-graphical services where those environment variables are not inherited.
 
+#### Scenario: Helper selects X11 or Wayland session variables
+- **GIVEN** configuration sets `secret_service_session` to `auto`, `x11`, or `wayland` with `auto` as the default
+- **WHEN** the parent prepares the Secret Service helper environment from logind
+- **THEN** `auto` MUST prefer logind's `Type` and fall back to `Display` patterns (`wayland-*` for Wayland, `:N` for X11)
+- **AND** `x11` MUST export `DISPLAY` without `WAYLAND_DISPLAY`
+- **AND** `wayland` MUST export `WAYLAND_DISPLAY` without `DISPLAY`
+- **AND** every mode MUST export `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS=unix:path=${XDG_RUNTIME_DIR}/bus` when logind or `/run/user/<uid>/bus` exposes a target-user runtime bus.
+
+#### Scenario: Helper overrides unusable DBus addresses
+- **WHEN** `$DBUS_SESSION_BUS_ADDRESS` is missing, empty, starts with `autolaunch:`, or points outside the target user's runtime bus
+- **THEN** the parent MUST override it with the target user's synthesized runtime bus address before the helper contacts Secret Service
+- **AND** it MUST log the configured mode, selected mode, logind session summary, and applied environment variable names without logging secret values.
+
 #### Scenario: Logind unreachable still surfaces structured errors
 - **WHEN** logind rejects the query, no active session is exposed for the user, or the runtime directory is missing
 - **THEN** the parent MUST log the structured reason (e.g., `no active logind session for user sett4`) and continue with the existing helper flow

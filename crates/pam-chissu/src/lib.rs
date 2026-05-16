@@ -10,7 +10,9 @@ use std::slice;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use chissu_config::{self, ConfigError, ResolvedConfig, ResolvedConfigWithSource};
+use chissu_config::{
+    self, ConfigError, ResolvedConfig, ResolvedConfigWithSource, SecretServiceSessionMode,
+};
 use chissu_face_core::capture::{capture_frame_in_memory, CaptureConfig, DeviceLocator};
 use chissu_face_core::errors::AppError;
 use chissu_face_core::faces::{
@@ -21,7 +23,7 @@ use chissu_face_core::faces::{
 use chissu_face_core::secret_service::default_service_name;
 use image::{Rgb, RgbImage};
 use libc::{c_int, free};
-use logind::LogindInspector;
+use logind::{EffectiveSessionMode, LogindInspector};
 use nix::unistd::{getegid, geteuid, User};
 use pam_sys::{
     get_item, get_user, ConvClosure, PamConversation, PamHandle, PamItemType, PamMessage,
@@ -375,7 +377,7 @@ fn authenticate_user(
     let mut helper_env: Option<HelperEnvOverrides> = None;
 
     if config.require_secret_service {
-        helper_env = prepare_helper_env(request, logger);
+        helper_env = prepare_helper_env(request, config.secret_service_session, logger);
         log_privilege_drop_context(&request.user, logger);
         match run_secret_service_helper(&request.user, config.capture_timeout, helper_env.as_ref())
         {
@@ -681,13 +683,11 @@ fn load_config() -> PamResult<ResolvedConfigWithSource> {
     chissu_config::load_resolved_config().map_err(map_config_error)
 }
 
-fn prepare_helper_env(request: &PamRequest, logger: &mut PamLogger) -> Option<HelperEnvOverrides> {
-    let needs = HelperEnvNeeds::detect();
-    if !needs.any() {
-        logger.debug("DISPLAY/DBUS/XDG already present; skipping logind environment hydration");
-        return None;
-    }
-
+fn prepare_helper_env(
+    request: &PamRequest,
+    session_mode: SecretServiceSessionMode,
+    logger: &mut PamLogger,
+) -> Option<HelperEnvOverrides> {
     let uid = match lookup_uid(&request.user) {
         Ok(uid) => uid,
         Err(err) => {
@@ -702,23 +702,39 @@ fn prepare_helper_env(request: &PamRequest, logger: &mut PamLogger) -> Option<He
     let inspector = LogindInspector::new();
     match inspector.inspect(uid, request.tty.as_deref()) {
         Ok(Some(env)) => {
+            let effective_mode = env.effective_session_mode(session_mode);
             let pairs: Vec<(String, String)> = env
-                .env_pairs()
+                .env_pairs(session_mode)
                 .into_iter()
-                .filter(|(key, _)| needs.accepts(key))
+                .filter(|(key, value)| should_apply_env_override(key, value))
                 .collect();
-            if pairs.is_empty() {
+            let removals = opposite_session_env_removals(effective_mode);
+            if pairs.is_empty() && removals.is_empty() {
                 logger.debug(
-                    "Logind session found but no missing environment variables required overrides",
+                    "Logind session found but no Secret Service environment overrides were needed",
                 );
                 None
             } else {
+                let applied = pairs
+                    .iter()
+                    .map(|(key, _)| key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let removed = removals
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(",");
                 logger.info(&format!(
-                    "Recovered session environment from logind for user '{}': {}",
+                    "Recovered Secret Service session environment from logind for user '{}': {} configured_mode={} selected_mode={} applied={} removed={}",
                     request.user,
-                    env.summary()
+                    env.summary(),
+                    session_mode_name(session_mode),
+                    effective_mode.as_str(),
+                    applied,
+                    removed,
                 ));
-                Some(HelperEnvOverrides::from_pairs(pairs))
+                Some(HelperEnvOverrides::from_parts(pairs, removals))
             }
         }
         Ok(None) => {
@@ -757,40 +773,54 @@ fn map_config_error(err: ConfigError) -> AuthError {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HelperEnvNeeds {
-    display: bool,
-    runtime: bool,
-    dbus: bool,
-}
-
-impl HelperEnvNeeds {
-    fn detect() -> Self {
-        Self {
-            display: env_var_missing("DISPLAY"),
-            runtime: env_var_missing("XDG_RUNTIME_DIR"),
-            dbus: env_var_missing("DBUS_SESSION_BUS_ADDRESS"),
-        }
-    }
-
-    fn any(&self) -> bool {
-        self.display || self.runtime || self.dbus
-    }
-
-    fn accepts(&self, key: &str) -> bool {
-        match key {
-            "DISPLAY" | "WAYLAND_DISPLAY" => self.display,
-            "XDG_RUNTIME_DIR" => self.runtime,
-            "DBUS_SESSION_BUS_ADDRESS" => self.dbus,
-            _ => false,
-        }
-    }
-}
-
 fn env_var_missing(name: &str) -> bool {
     match env::var_os(name) {
         Some(value) => value.is_empty(),
         None => true,
+    }
+}
+
+fn should_apply_env_override(key: &str, value: &str) -> bool {
+    match key {
+        "DISPLAY" | "WAYLAND_DISPLAY" => env_var_missing(key),
+        "XDG_RUNTIME_DIR" => env::var(key).map_or(true, |current| current != value),
+        "DBUS_SESSION_BUS_ADDRESS" => dbus_env_needs_override(value),
+        _ => false,
+    }
+}
+
+fn opposite_session_env_removals(mode: EffectiveSessionMode) -> Vec<String> {
+    match mode {
+        EffectiveSessionMode::X11 if env_var_present("WAYLAND_DISPLAY") => {
+            vec!["WAYLAND_DISPLAY".into()]
+        }
+        EffectiveSessionMode::Wayland if env_var_present("DISPLAY") => vec!["DISPLAY".into()],
+        _ => Vec::new(),
+    }
+}
+
+fn dbus_env_needs_override(target_address: &str) -> bool {
+    match env::var("DBUS_SESSION_BUS_ADDRESS") {
+        Ok(current) => {
+            let trimmed = current.trim();
+            trimmed.is_empty() || trimmed.starts_with("autolaunch:") || trimmed != target_address
+        }
+        Err(_) => true,
+    }
+}
+
+fn env_var_present(name: &str) -> bool {
+    match env::var_os(name) {
+        Some(value) => !value.is_empty(),
+        None => false,
+    }
+}
+
+fn session_mode_name(mode: SecretServiceSessionMode) -> &'static str {
+    match mode {
+        SecretServiceSessionMode::Auto => "auto",
+        SecretServiceSessionMode::X11 => "x11",
+        SecretServiceSessionMode::Wayland => "wayland",
     }
 }
 
@@ -1076,6 +1106,59 @@ mod tests {
             "helper produced no response".into(),
         ));
         assert!(matches!(err, AuthError::Pam(message) if message.contains("no response")));
+    }
+
+    #[test]
+    #[serial]
+    fn dbus_env_override_accepts_missing_empty_and_autolaunch_values() {
+        env::remove_var("DBUS_SESSION_BUS_ADDRESS");
+        assert!(dbus_env_needs_override("unix:path=/run/user/1000/bus"));
+
+        env::set_var("DBUS_SESSION_BUS_ADDRESS", "");
+        assert!(dbus_env_needs_override("unix:path=/run/user/1000/bus"));
+
+        env::set_var("DBUS_SESSION_BUS_ADDRESS", "autolaunch:scope=abc");
+        assert!(dbus_env_needs_override("unix:path=/run/user/1000/bus"));
+    }
+
+    #[test]
+    #[serial]
+    fn dbus_env_override_rejects_wrong_runtime_bus() {
+        env::set_var("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/2000/bus");
+
+        assert!(dbus_env_needs_override("unix:path=/run/user/1000/bus"));
+    }
+
+    #[test]
+    #[serial]
+    fn dbus_env_override_keeps_target_runtime_bus() {
+        env::set_var("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus");
+
+        assert!(!dbus_env_needs_override("unix:path=/run/user/1000/bus"));
+    }
+
+    #[test]
+    #[serial]
+    fn opposite_session_env_removals_clear_display_for_wayland() {
+        env::set_var("DISPLAY", ":0");
+        env::remove_var("WAYLAND_DISPLAY");
+
+        assert_eq!(
+            opposite_session_env_removals(EffectiveSessionMode::Wayland),
+            vec!["DISPLAY".to_string()]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn opposite_session_env_removals_clear_wayland_for_x11() {
+        env::remove_var("DISPLAY");
+        env::set_var("WAYLAND_DISPLAY", "wayland-0");
+
+        assert_eq!(
+            opposite_session_env_removals(EffectiveSessionMode::X11),
+            vec!["WAYLAND_DISPLAY".to_string()]
+        );
     }
 
     #[test]

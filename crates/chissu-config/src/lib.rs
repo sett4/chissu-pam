@@ -17,6 +17,21 @@ pub const DEFAULT_PIXEL_FORMAT: &str = "Y16";
 pub const DEFAULT_WARMUP_FRAMES: u32 = 4;
 pub const DEFAULT_JITTERS: u32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretServiceSessionMode {
+    Auto,
+    #[serde(rename = "x11")]
+    X11,
+    Wayland,
+}
+
+impl Default for SecretServiceSessionMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConfigFile {
     pub similarity_threshold: Option<f64>,
@@ -30,6 +45,7 @@ pub struct ConfigFile {
     pub landmark_model: Option<PathBuf>,
     pub encoder_model: Option<PathBuf>,
     pub require_secret_service: Option<bool>,
+    pub secret_service_session: Option<SecretServiceSessionMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +61,7 @@ pub struct ResolvedConfig {
     pub landmark_model: Option<PathBuf>,
     pub encoder_model: Option<PathBuf>,
     pub require_secret_service: bool,
+    pub secret_service_session: SecretServiceSessionMode,
 }
 
 impl ResolvedConfig {
@@ -75,6 +92,7 @@ impl ResolvedConfig {
             landmark_model: raw.landmark_model,
             encoder_model: raw.encoder_model,
             require_secret_service: raw.require_secret_service.unwrap_or(true),
+            secret_service_session: raw.secret_service_session.unwrap_or_default(),
         }
     }
 }
@@ -261,6 +279,10 @@ mod tests {
         );
         assert_eq!(resolved.resolved.video_device, DEFAULT_VIDEO_DEVICE);
         assert_eq!(resolved.resolved.warmup_frames, DEFAULT_WARMUP_FRAMES);
+        assert_eq!(
+            resolved.resolved.secret_service_session,
+            SecretServiceSessionMode::Auto
+        );
     }
 
     #[test]
@@ -272,5 +294,34 @@ mod tests {
         let resolved = load_resolved_from_paths(&[primary.clone()]).unwrap();
         assert_eq!(resolved.source, Some(primary));
         assert_eq!(resolved.resolved.capture_timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn parses_secret_service_session_modes() {
+        let dir = tempdir().unwrap();
+        for (raw, expected) in [
+            ("auto", SecretServiceSessionMode::Auto),
+            ("x11", SecretServiceSessionMode::X11),
+            ("wayland", SecretServiceSessionMode::Wayland),
+        ] {
+            let path = dir.path().join(format!("{raw}.toml"));
+            fs::write(&path, format!("secret_service_session = \"{raw}\"")).unwrap();
+
+            let loaded = load_resolved_from_paths(&[path]).unwrap();
+            assert_eq!(loaded.resolved.secret_service_session, expected);
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_secret_service_session_mode() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("broken.toml");
+        fs::write(&path, "secret_service_session = \"mir\"").unwrap();
+
+        let err = load_from_paths(&[path.clone()]).unwrap_err();
+        match err {
+            ConfigError::Parse { path: err_path, .. } => assert_eq!(err_path, path),
+            other => panic!("unexpected error: {:?}", other),
+        }
     }
 }

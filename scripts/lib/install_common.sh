@@ -48,6 +48,8 @@ embedding_store_dir = "$store_dir"
 landmark_model = "$model_dir/$INSTALL_COMMON_LANDMARK_FILE"
 encoder_model = "$model_dir/$INSTALL_COMMON_ENCODER_FILE"
 require_secret_service = true
+# Secret Service session environment mode: "auto", "x11", or "wayland".
+secret_service_session = "auto"
 EOF_CFG
 }
 
