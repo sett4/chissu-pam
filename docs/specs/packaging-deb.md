@@ -1,7 +1,7 @@
-# packaging-deb Specification
+# packaging-deb Spec
 
 ## Purpose
-TBD - created by archiving change add-deb-packaging-script. Update Purpose after archive.
+Defines Debian and Ubuntu package creation, install-time hooks, dlib model provisioning, and pam-auth-update integration.
 ## Requirements
 ### Requirement: Debian Packaging Script
 The repository MUST ship a script that produces Debian-compatible `.deb` artifacts using the standard `dpkg-buildpackage` flow, and the resulting package MUST declare only runtime dependencies for end users while keeping build-time headers in `Build-Depends`.

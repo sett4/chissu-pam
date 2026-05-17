@@ -2,336 +2,158 @@
 
 ## Overview
 
-chissu-pam is an open-source, face-recognition-driven Pluggable Authentication Module (PAM) that pairs a Rust CLI with shared libraries to enroll and verify users via infrared-friendly V4L2 webcams. The workspace explores a reproducible workflow that captures frames, derives reusable face embeddings, and wires those embeddings into PAM conversations for experimental login flows.
+chissu-pam is an open-source, experimental Pluggable Authentication Module
+(PAM) for Linux face authentication. It pairs a Rust CLI with a PAM module to
+capture frames from infrared-friendly V4L2 webcams, enroll face embeddings, and
+compare a live capture during PAM authentication.
 
-This repository is in an early, exploratory phase: interfaces move quickly, persistence formats may break, and the security surface has not been formally audited. Treat every component as pre-production, review the code before deploying to sensitive systems, and expect rough edges as the project evolves.
+The project is intended for learning, experimentation, and careful local
+evaluation. It is not a replacement for a production-grade biometric
+authentication system.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Why This Project](#why-this-project)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-- [Workspace Layout](#workspace-layout)
-- [Usage](#usage)
+- [Project Status / Security Notice](#project-status--security-notice)
+- [Features](#features)
+- [Supported Platforms / Requirements](#supported-platforms--requirements)
+- [Quick Install](#quick-install)
+- [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Testing](#testing)
-- [Manual Verification with Hardware](#manual-verification-with-hardware)
+- [Documentation](#documentation)
+- [Development](#development)
 - [License](#license)
 
-## Why This Project
+## Project Status / Security Notice
 
-- **Secret Service–backed encryption.** Embedding stores are wrapped with AES-GCM keys managed by the GNOME Secret Service (`chissu-cli keyring ...`). Even if `/var/lib/chissu-pam/embeddings/*.json` leaks, the ciphertext is unreadable until the legitimate user session unlocks the keyring.
-- **Root privileges only for system wiring.** Daily capture, enrollment, and embedding store maintenance all run unprivileged inside the user’s desktop session so Secret Service is reachable. Elevated access is required only for installing binaries, copying `/etc/chissu-pam/config.toml`, or editing `/etc/pam.d/<service>`.
+This repository is in an early, exploratory phase: interfaces move quickly,
+persistence formats may break, and the security surface has not been formally
+audited. Review the code before enabling the module on any sensitive system.
 
-## Getting Started
+PAM configuration mistakes can lock you out. Before wiring `libpam_chissu.so`
+into a real service, keep a password-based fallback, maintain an active root or
+recovery shell, and test against a non-critical PAM service first.
 
-### Prerequisites
+## Features
 
-- Linux with Video4Linux2 (V4L2) support and an infrared-capable webcam.
-- Rust 1.85 or newer (Edition 2024) plus `cargo` in your `$PATH`.
-- GNOME Secret Service (or another libsecret-compatible keyring) running in the target user session.
-- systemd-logind (via `systemd-logind.service`) with an active desktop session for every user that expects face unlock. PAM uses logind's `Display`, `Type`, and runtime environment to reach Secret Service during non-graphical prompts (polkit-1, 1Password, etc.).
-- Required kernel permissions to access `/dev/video*` devices.
-- System libraries needed by the dlib face-recognition bindings, `bindgen`/`libclang`, and PAM development headers.
+- **V4L2 capture pipeline.** Captures infrared-friendly frames from Linux
+  `/dev/video*` devices through the shared Rust capture layer.
+- **Encrypted embedding stores.** Face embeddings are encrypted with AES-GCM
+  keys managed through GNOME Secret Service or another libsecret-compatible
+  keyring.
+- **Unprivileged enrollment.** Daily capture, enrollment, and embedding
+  maintenance run in the user's desktop session; elevated access is reserved
+  for installation and PAM wiring.
+- **PAM integration.** `libpam_chissu.so` compares a live camera capture against
+  the target user's enrolled embeddings and reports authentication events via
+  PAM conversations and syslog.
+- **Human and JSON CLI output.** CLI commands support readable terminal output
+  and structured `--json` output for scripting.
 
-Install the native dependencies on Debian/Ubuntu with:
+## Supported Platforms / Requirements
+
+- Linux with Video4Linux2 (V4L2) support.
+- An infrared-capable webcam and permission to access the relevant
+  `/dev/video*` device.
+- Rust 1.85 or newer plus `cargo` for source builds.
+- GNOME Secret Service, or another libsecret-compatible keyring, running in the
+  target user's session.
+- systemd-logind with an active desktop session for users who expect face
+  unlock.
+- Native development libraries for dlib, OpenBLAS/LAPACK, libclang, GTK, udev,
+  and PAM when building locally.
+
+On Debian/Ubuntu, the native build dependencies are:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential pkg-config libclang-dev libdlib-dev libopenblas-dev liblapack-dev libgtk-3-dev libudev-dev libpam0g-dev
 ```
 
-#### Download the dlib models
-
-The CLI and PAM module need the official dlib weights:
+The CLI and PAM module also need the official dlib model files:
 
 - `shape_predictor_68_face_landmarks.dat`
 - `dlib_face_recognition_resnet_model_v1.dat`
 
-Download them from https://dlib.net/files/ once, then store them in a shared location (for example `/var/lib/chissu-pam/dllib-models`). Point `chissu-cli` at the files via CLI flags or entries in `config.toml`. When you install the Debian/Ubuntu packages described below, the `postinst` hook handles these downloads automatically unless you export `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` for offline deployments.
+Packages and installer scripts can download these models into
+`/var/lib/chissu-pam/dlib-models`. For manual installs, download them from
+<https://dlib.net/files/> and point `config.toml` or the relevant CLI flags at
+the `.dat` files.
 
-### Installation
+## Quick Install
 
-#### Debian/Ubuntu packages (recommended)
-
-1. **Build the package** (requires `debhelper`, `dpkg-dev`, and `curl`):
-
-   ```bash
-   build/package-deb.sh --distro debian
-   build/package-deb.sh --distro ubuntu
-   ```
-
-   Pass `--version` to override the detected workspace version or `--arch` for non-`amd64` builds. When building on a native Debian/Ubuntu host, the artifact name auto-detects the release and lands in `dist/chissu-pam_<version>_<distro>-<release>_amd64.deb` such as `chissu-pam_0.6.0-rc3_ubuntu-25.10_amd64.deb`.
-   When cross-building inside a container, pass `--suite <codename>` plus `--artifact-label <distro-release>` explicitly, for example `--suite noble --artifact-label ubuntu-24.04`.
-
-2. **Install the package**:
-
-   ```bash
-   sudo dpkg -i dist/chissu-pam_0.3.0_debian-12_amd64.deb
-   ```
-
-   The CLI binary, PAM module, default config, and doc snippets are placed under the standard system paths.
-
-3. **Automatic dlib weights**: during installation the `postinst` script downloads both dlib model files into `/var/lib/chissu-pam/dlib-models`. Skip downloads (for offline mirrors or air-gapped hosts) by setting `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` before running `dpkg -i`. When purging the package, set `CHISSU_PAM_PURGE_MODELS=1` to remove the downloaded weights as well.
-
-4. **PAM wiring + config**: the package registers `libpam_chissu.so` via `pam-auth-update --package --enable chissu`, inserting it ahead of `pam_unix.so`. Verify with `sudo pam-auth-update --list`. Adjust `/etc/chissu-pam/config.toml` as needed for your camera settings.
-
-#### Automated releases
-
-- Push a tag that matches `v<MAJOR>.<MINOR>.<PATCH>` or `v<MAJOR>.<MINOR>.<PATCH>-<prerelease>` (for example `git tag v0.3.0 && git push origin v0.3.0` or `git tag v0.3.0-rc1 && git push origin v0.3.0-rc1`).
-- The `Release Packages` workflow builds release-specific `.deb` files inside Debian/Ubuntu container images and publishes Debian 12, Ubuntu 24.04, Ubuntu 25.10, plus Fedora RPM assets for the same tag.
-- For RPM prereleases, the generated artifact name keeps the original semver, but the spec normalizes it internally to `Version=<core>` and `Release=0.<release>.<prerelease>` so `rpmbuild` accepts RC tags and upgrade ordering remains correct.
-- When the workflow finishes, GitHub Releases contains assets such as `chissu-pam_<version>_debian-12_amd64.deb`, `chissu-pam_<version>_ubuntu-24.04_amd64.deb`, `chissu-pam_<version>_ubuntu-25.10_amd64.deb`, and `chissu-pam_<version>_<distro>_x86_64.rpm`. Release notes are auto-generated; edit them manually if more detail is needed.
-- If the workflow fails, fix the issue and click “Re-run jobs” for the tag; assets are replaced when uploads succeed.
-
-#### RPM packages (Fedora/RHEL)
-
-1. **Build the package** (requires `rpm-build`, `createrepo-c`, `clang`, `pam-devel`, `dlib-devel`, `openblas-devel`, `lapack-devel`, `gtk3-devel`, `systemd-devel`, and `libudev-devel`):
-
-   ```bash
-   build/package-rpm.sh --distro fedora   # add --version <semver> to override
-   ```
-
-   Add `--skip-build` if you've already produced release binaries via another step. Artifacts land in `dist/chissu-pam_<version>_<distro>_x86_64.rpm`.
-   Debian/Ubuntu and RedHat-family systems both use OpenBLAS plus LAPACK here; no separate `atlas` package is required.
-
-2. **Install the package**:
-
-   ```bash
-   sudo dnf install ./dist/chissu-pam_0.3.0_fedora_x86_64.rpm
-   ```
-
-3. **Automatic dlib weights**: `%post` mirrors the Debian behaviour—models are downloaded into `/var/lib/chissu-pam/dlib-models` unless `CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is exported before running `dnf install`. Set `CHISSU_PAM_PURGE_MODELS=1` before uninstalling to remove the downloaded weights.
-
-4. **PAM wiring**: `%post` uses `authselect` to create/refresh a `custom/chissu` profile and inserts `libpam_chissu.so` before `pam_unix.so` in `system-auth` and `password-auth`. On erase, `%postun` restores the previous profile. Verify with `authselect current` and adjust `/etc/chissu-pam/config.toml` for camera options.
-
-##### Build RPMs via Docker (Ubuntu hosts)
-
-Use the provided Fedora builder image when `rpmbuild` (or the necessary headers) are missing locally:
+Download the package for your distribution from the
+[GitHub Releases page](https://github.com/sett4/chissu-pam/releases), then
+install it with your system package manager:
 
 ```bash
-docker build -t chissu-rpm -f build/package/rpm/Dockerfile .
-docker run --rm -it \
-  -v "$PWD":/workspace \
-  -w /workspace \
-  chissu-rpm \
-  ./build/package-rpm.sh --distro fedora --version 0.3.0
+# Debian/Ubuntu
+sudo dpkg -i ./chissu-pam_<version>_<distro-release>_amd64.deb
+
+# Fedora/RHEL-family systems
+sudo dnf install ./chissu-pam_<version>_<distro>_x86_64.rpm
 ```
 
-The container writes artifacts back into `dist/` inside your working tree. Pass `--skip-build` if you already have release binaries before invoking the container.
+The packages install `chissu-cli`, `libpam_chissu.so`, a default
+`/etc/chissu-pam/config.toml`, PAM integration snippets, and documentation
+under standard system paths. Package hooks download the dlib model files unless
+`CHISSU_PAM_SKIP_MODEL_DOWNLOAD=1` is set before installation.
 
-#### Manual install from source
-
-1. **Build release artifacts** (the workspace expects `CARGO_HOME` to be inside the repo):
-
-   ```bash
-   cargo build --release -p chissu-cli -p pam-chissu
-   ```
-
-2. **Install the CLI**:
-
-   ```bash
-   sudo install -m 0755 target/release/chissu-cli /usr/local/bin/chissu-cli
-   ```
-
-3. **Create store/model directories**:
-
-   ```bash
-   sudo mkdir -p /var/lib/chissu-pam/embeddings
-   sudo chown root:root /var/lib/chissu-pam/embeddings
-   sudo chmod 01733 /var/lib/chissu-pam/embeddings
-
-   sudo mkdir -p /var/lib/chissu-pam/dlib-models
-   sudo curl https://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 -o /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2
-   sudo curl https://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2 -o /var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
-   sudo bunzip2 /var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat.bz2 /var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat.bz2
-   ```
-
-   (Skip this step when installing via the `.deb` packages—the `postinst` script performs the same download.)
-
-4. **Install the PAM module**:
-
-   ```bash
-   sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
-   ```
-
-   (Use `/lib/security` on distributions that do not provide the multiarch PAM directory.)
-
-5. **Provision configuration**: copy (or author) `/etc/chissu-pam/config.toml` and optionally `/usr/local/etc/chissu-pam/config.toml`. Specify `video_device`, `embedding_store_dir`, `landmark_model`, `encoder_model`, and PAM-related thresholds (see [Configuration](#configuration)).
-
-6. **Store dlib weights** under a readable directory (for example `/var/lib/chissu-pam/dlib-models`) and update the config or environment variables so both CLI and PAM know where to load them.
-
-7. **Wire PAM** by editing the relevant `/etc/pam.d/<service>` entry:
-
-   ```text
-   auth    sufficient      /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so
-   ```
-
-   Place this `auth`-only entry **before** `pam_unix.so` so face verification runs ahead of password prompts. Keep your existing `auth` stack intact—this module augments, not replaces, other factors.
-
-8. **Verify Secret Service access** for each user who will authenticate:
-
-   ```bash
-   chissu-cli keyring check --json || echo "Secret Service is locked"
-   ```
-
-9. **Test locally** before touching production logins:
-
-   ```bash
-   cargo test --workspace
-   chissu-cli capture --json | jq
-   ```
-
-10. **sudo**:
-
-    ```bash
-    sudo echo test chissu-pam
-    ```
-
-#### Automated installer (Ubuntu/Fedora/Rocky/Arch)
-
-If you already have release artifacts (or a downloaded bundle) you can let the repo script place files and dependencies for you:
+If you are working from source, build the release artifacts and use the
+installer script:
 
 ```bash
+CARGO_HOME="$(pwd)/.cargo-home" cargo build --release -p chissu-cli -p pam-chissu
+
 sudo scripts/install-chissu.sh \
   --artifact-dir target/release \
   --model-dir /var/lib/chissu-pam/dlib-models \
   --store-dir /var/lib/chissu-pam/embeddings
 ```
 
-- Auto-detects Ubuntu/Debian vs Fedora vs Rocky Linux vs Arch Linux, **does not install packages automatically**, and instead prints a command to install any missing prerequisites before continuing. PAM module goes to `/lib/security` (Debian/Ubuntu/Arch) or `/usr/lib64/security` (Fedora/Rocky, with `restorecon` when available).
-- On Arch it installs via `pacman -S --needed`: `base-devel`, `pkgconf`, `openblas`, `lapack`, `gtk3`, `systemd`, `curl`, `rust`, and `bzip2`. dlib is in AUR, so `yay -S dlib`.
-- Wires PAM automatically per distro with a single `auth sufficient libpam_chissu.so` entry placed **before** `pam_unix.so`: Debian/Ubuntu via `pam-auth-update` snippet `/usr/share/pam-configs/chissu`, Fedora/RHEL/Rocky via an `authselect` custom profile, Arch by including a `/etc/pam.d/chissu` stack from `system-local-login`/`login`.
-- Supports rollbacks with `--uninstall` (removes only the PAM wiring using distro-native tools) and `--dry-run` to preview all changes. Backups land in `/var/lib/chissu-pam/install/`.
-- Seeds `/etc/chissu-pam/config.toml` if missing (honours `--force` to overwrite with a backup) and ensures `/var/lib/chissu-pam/{embeddings,dlib-models}` exist. The embedding directory is enforced as `root:root` mode `01733` so unprivileged users can run `chissu-cli enroll` while directory listing is restricted and PAM/root can still read stores. Defaults now set `warmup_frames = 4` and `require_secret_service = true` in the generated config.
-- Downloads the dlib models only when the `.dat` files are absent; add `--skip-model-download` to prevent network calls or `--dry-run` to preview actions without changes.
-- Override paths with `--artifact-dir`, `--model-dir`, `--store-dir`, or `--config-path` if your environment differs.
+The installer supports Debian/Ubuntu, Fedora, Rocky Linux, and Arch Linux. It
+prints missing prerequisite packages instead of installing them automatically,
+supports `--dry-run`, and can remove only its PAM wiring with `--uninstall`.
 
-To roll back just the PAM wiring, run `sudo scripts/install-chissu.sh --uninstall`. Debian/Ubuntu use `pam-auth-update --remove chissu`, RHEL/Fedora restore the previously selected `authselect` profile (saved under `/var/lib/chissu-pam/install/authselect.previous`), and Arch removes the `auth include chissu` line plus `/etc/pam.d/chissu`.
+Package build and release-maintenance details live in
+[docs/packaging.md](docs/packaging.md) and [docs/releasing.md](docs/releasing.md).
 
-### Secret Service + logind troubleshooting
+## Quick Start
 
-`pam_chissu` now hydrates missing or unusable `$DBUS_SESSION_BUS_ADDRESS`, `$XDG_RUNTIME_DIR`, `$DISPLAY`, and `$WAYLAND_DISPLAY` variables from systemd-logind whenever `require_secret_service = true`. This matters for PAM clients like polkit-1 (1Password unlock dialogs, GNOME Software updates, etc.) that invoke authentication without inheriting your desktop environment. The default `secret_service_session = "auto"` detects X11 vs Wayland from logind's `Type`/`Display`; set it to `"x11"` or `"wayland"` only when an unusual desktop stack needs an explicit override. Use these checks whenever the journal logs `Secret Service unavailable; skipping face authentication` or `No active logind session`:
-
-1. **Confirm the session exists**
-
-   ```bash
-   loginctl list-sessions
-   ```
-
-   Ensure the target user shows an `active` session bound to the expected `seat` and `tty`.
-
-2. **Inspect session properties**
-
-   ```bash
-   loginctl show-session <id> -p Display -p Type -p TTY -p Remote -p State
-   ```
-
-   The helper uses `Type` plus `Display` to decide whether to export `DISPLAY` for X11 or `WAYLAND_DISPLAY` for Wayland before forking.
-
-3. **Verify the runtime directory**
-
-   ```bash
-   loginctl show-user $(id -u $USER) -p RuntimePath
-   test -S /run/user/$(id -u)/bus
-   ```
-
-   A valid runtime dir allows the helper to synthesize `unix:path=$XDG_RUNTIME_DIR/bus` for Secret Service. This session bus is the important path on Wayland-only systems; otherwise libdbus may fall back to X11 autolaunch and fail with messages such as `Unable to autolaunch a dbus-daemon without a $DISPLAY for X11`.
-
-Successful hydration emits `Recovered Secret Service session environment from logind for user 'alice': session=3 tty=tty2 seat=seat0 type=wayland ... configured_mode=auto selected_mode=wayland applied=...` in syslog. If you instead see `No active logind session for user 'alice' (tty hint tty2)` the PAM stack will fall back to passwords until that desktop session is running/unlocked.
-
-If the recovered address still fails with `Failed to connect to socket /run/user/<uid>/bus: Permission denied`, the helper logs a DBus preflight line with its `uid/euid/gid/egid` plus the runtime directory and bus socket owner/mode. That usually indicates the PAM caller is isolated from the user's runtime bus by the service manager or a security profile, not that X11/Wayland detection failed.
-
-Ubuntu 26.04 no longer offers an X11-based GNOME session in typical installs, so Wayland-only behavior is expected there; see [Ubuntu Weekly Recipe 908](https://gihyo.jp/admin/serial/01/ubuntu-recipe/0908). Keep `secret_service_session = "auto"` unless logind reports misleading session data.
-
-Desktop unlock services such as `cinnamon-screensaver` may invoke PAM from a context that cannot perform `setuid`/`setgid` again. When that happens, `pam_chissu` now logs the failing privilege-drop stage and intentionally falls back to password authentication instead of aborting the entire unlock flow.
-
-## Workspace layout
-
-```
-chissu-pam/
-├── Cargo.toml            # Workspace-only manifest (no root package)
-├── crates/
-│   ├── chissu-cli/        # Binary crate (CLI entrypoint)
-│   ├── chissu-face-core/  # Shared library crate
-│   └── pam-chissu/        # PAM module crate (libpam_chissu.so)
-└── tests/                # Cross-crate integration tests/fixtures
-```
-
-- Each crate owns a local `tests/` directory for component-scoped coverage (`cargo test -p <crate>`).
-- Repository-level integration tests that touch multiple crates stay under the top-level `tests/` directory and run via `cargo test --workspace`.
-- All crates inherit shared metadata (version, edition) from `[workspace.package]` in the root manifest, so changes only need to be made once.
-
-## Building
+Run the environment doctor first:
 
 ```bash
-cargo build
-```
-
-## Usage
-
-`chissu-cli` exposes capture, feature extraction, enrollment, and maintenance commands. Run the installed binary directly (preferred) or invoke `cargo run -p chissu-cli -- …` during development. Detailed capture/extraction/compare walkthroughs now live in [docs/chissu-cli.md](docs/chissu-cli.md) while the sections below focus on enrollment and PAM integration flows.
-
-### Environment doctor (`chissu-cli doctor`)
-
-Run a quick, non-destructive diagnostic to confirm PAM + enrollment prerequisites before debugging deeper issues:
-
-```bash
-chissu-cli doctor            # human-readable
-chissu-cli doctor --polkit   # include polkit-agent-helper sandbox checks
+chissu-cli doctor
+chissu-cli doctor --polkit
 chissu-cli --json doctor | jq
 ```
 
-Checks include config discovery/parse, video device access, embedding store permissions, dlib model readability, Secret Service availability, the PAM module location, and whether `/etc/pam.d/*` references `pam_chissu`. Exit code is `0` only when every check passes; warnings (e.g., both config files present) or failures return `1` with details per check.
+`doctor` checks configuration, video device access, model readability, Secret
+Service availability, embedding store permissions, PAM module placement, and
+PAM stack references. Use `--polkit` when debugging desktop prompts such as
+1Password or GNOME Software.
 
-Add `--polkit` when debugging 1Password or other polkit-based desktop prompts. The extra checks inspect `polkit-agent-helper@.service` and report sandbox settings that can hide `/run/user/<uid>/bus` or the configured camera device; see [Polkit Agent Helper Troubleshooting](docs/users-guide/polkit-agent-helper-troubleshooting.md) for the matching systemd drop-in guidance.
-
-### Enroll with live capture (`chissu-cli enroll`)
-
-Automate the capture → extract → enroll pipeline with a single command that inherits capture defaults from `/etc/chissu-pam/config.toml` (falling back to `/usr/local/etc/chissu-pam/config.toml` and finally `/dev/video0` + `Y16` + four warm-up frames). The command captures a frame, encodes embeddings, encrypts them via Secret Service–managed AES-GCM keys, and deletes the temporary capture + embedding files once enrollment succeeds.
+Enroll your own face embeddings from a live capture:
 
 ```bash
 chissu-cli enroll
 ```
 
-- Target user defaults to the invoking account and does **not** require `sudo`. Because Secret Service runs in your desktop session, the CLI can request the embedding key, encrypt the updated store, and return status without elevated privileges.
-- Use `--device /dev/video2` when you need to override the configured device, `--store-dir <path>` to bypass the config file, and `--jitters`, `--landmark-model`, `--encoder-model` to fine-tune extraction just like `faces extract`.
-- Model paths (`landmark_model`, `encoder_model`) inherit from `/etc/chissu-pam/config.toml` when present, fall back to `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`, and only then require explicit CLI flags.
+The command captures a frame, extracts embeddings, stores them encrypted through
+Secret Service-managed AES-GCM keys, and removes temporary capture artifacts.
+It defaults to the invoking user and normally does not require `sudo`.
 
-Need to enroll another user’s embeddings? Elevate just for that command so you can reach their Secret Service session and embedding store:
+To verify PAM behavior, start with a non-critical service or a controlled
+`pamtester` setup before changing login, sudo, or screen-unlock stacks. A minimal
+PAM entry looks like this:
 
-```bash
-sudo \
-  chissu-cli enroll --user bob
+```pam
+auth sufficient libpam_chissu.so
 ```
 
-`sudo` is required because `/var/lib/chissu-pam/embeddings/bob.json` is root-owned. The helper still talks to Bob’s Secret Service instance and refuses to enroll if it cannot obtain the AES-GCM key or if the service is locked.
-
-### PAM facial authentication
-
-The repository now ships a PAM module (`libpam_chissu.so`) that authenticates Linux users by comparing a live camera capture with embeddings enrolled via `faces enroll`.
-
-- Build the shared library with `cargo build --release -p pam-chissu` (or `cargo test -p pam-chissu` during development).
-- Copy `target/release/libpam_chissu.so` into your PAM module directory (for example `sudo install -m 0644 target/release/libpam_chissu.so /usr/lib/x86_64-linux-gnu/security/libpam_chissu.so` on Debian/Ubuntu) and reference it from `/etc/pam.d/<service>` with `auth sufficient libpam_chissu.so`. The build no longer emits the historical `libpam_chissuauth.so` symlink, so there is a single canonical shared object to package.
-- Configure the module via `/etc/chissu-pam/config.toml` (preferred) or `/usr/local/etc/chissu-pam/config.toml`. Each file is optional; when both are absent, the module falls back to:
-  - `similarity_threshold = 0.9`
-  - `capture_timeout_secs = 5`
-  - `frame_interval_millis = 500`
-  - `video_device = "/dev/video0"`
-  - `embedding_store_dir = "/var/lib/chissu-pam/embeddings"`
-  - `pixel_format = "Y16"`
-  - `warmup_frames = 0`
-  - `jitters = 1`
-  - `require_secret_service = false`
-- Syslog (facility `AUTHPRIV`) records start, success, timeout, and error events. Review output with `journalctl -t pam_chissu` or `journalctl SYSLOG_IDENTIFIER=pam_chissu`.
-- Interactive PAM conversations mirror those events on the terminal: successful matches trigger a `PAM_TEXT_INFO` banner, while retries and failures emit `PAM_ERROR_MSG` guidance ("stay in frame", "no embeddings", etc.) so operators see immediate feedback even without tailing syslog.
-- Before opening the camera the module now forks a short-lived helper that switches to the PAM target user (`setuid`) and talks to the user's GNOME Secret Service session over D-Bus. The helper returns a JSON payload containing either the AES-GCM embedding key, a "missing" status, or a structured error. The parent logs the outcome and (a) continues capture when the key was returned, (b) surfaces the "no embeddings" flow when the key is missing, or (c) returns `PAM_IGNORE` when Secret Service is locked/unreachable or privilege-dropping is denied so downstream modules can continue handling the login.
-- Use `chissu-cli keyring check` to verify that Secret Service is reachable for the current user before wiring the PAM module into a stack. The command exits `0` on success, emits structured JSON when `--json` is supplied, and surfaces the underlying keyring error when the probe fails. Set `require_secret_service = true` to enforce the helper inside PAM; it defaults to `false` so you can opt in once the desktop session exposes Secret Service. Store a 32-byte AES-GCM embedding key (Base64-encoded) under `service=chissu-pam` and `user=<pam user>` so the helper can unlock embedding files during authentication.
-- The module honours `DLIB_LANDMARK_MODEL` and `DLIB_ENCODER_MODEL` (or config entries with the same names) to locate dlib model files.
-
-See [`docs/pam-auth.md`](docs/pam-auth.md) for installation walkthroughs, configuration examples, and troubleshooting tips.
+Place the entry before `pam_unix.so` only after confirming password fallback and
+recovery access. See [docs/pam-auth.md](docs/pam-auth.md) for full installation,
+verification, and rollback guidance.
 
 ## Configuration
 
@@ -339,43 +161,72 @@ Both `chissu-cli` and `pam-chissu` read configuration from:
 
 1. `/etc/chissu-pam/config.toml`
 2. `/usr/local/etc/chissu-pam/config.toml`
-3. Built-in defaults (applied when neither file exists)
+3. Built-in defaults when neither file exists
 
-The first file that exists wins for each key; CLI flags or environment variables still override the resolved value. Common settings include:
+CLI flags and supported environment variables override resolved file values.
+Common settings include:
 
-| Key                                              | Purpose                                                                                    |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `video_device`                                   | Default V4L2 path (`/dev/video0` fallback).                                                |
-| `pixel_format`                                   | Negotiated capture pixel format (`Y16` fallback).                                          |
-| `warmup_frames`                                  | Number of frames to discard before saving.                                                 |
-| `embedding_store_dir`                            | Directory for encrypted embedding files (`/var/lib/chissu-pam/embeddings`).                |
-| `landmark_model` / `encoder_model`               | Paths to the dlib weights (overrideable via `DLIB_LANDMARK_MODEL` / `DLIB_ENCODER_MODEL`). |
-| `similarity_threshold`                           | PAM acceptance threshold (default `0.9`).                                                  |
-| `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |
-| `jitters`                                        | Number of random jitters applied when encoding embeddings.                                 |
-| `require_secret_service`                         | Fail fast when the Secret Service helper cannot obtain a key.                              |
-| `secret_service_session`                         | Secret Service helper session mode: `auto`, `x11`, or `wayland` (default `auto`).          |
+| Key | Purpose |
+| --- | --- |
+| `video_device` | Default V4L2 device path. |
+| `pixel_format` | Capture pixel format, commonly `Y16`. |
+| `warmup_frames` | Frames discarded before saving or evaluating a capture. |
+| `embedding_store_dir` | Directory for encrypted per-user embedding stores. |
+| `landmark_model` / `encoder_model` | dlib model file paths. |
+| `similarity_threshold` | PAM acceptance threshold. |
+| `capture_timeout_secs` / `frame_interval_millis` | Live-auth timing controls. |
+| `jitters` | dlib embedding jitter count. |
+| `require_secret_service` | Whether PAM requires keyring access before capture. |
+| `secret_service_session` | Secret Service session mode: `auto`, `x11`, or `wayland`. |
 
-For CLI operations, `chissu-config` also honours `CHISSU_PAM_STORE_DIR` for embedding storage overrides plus any immediate CLI flags. After editing the TOML file, re-run `chissu-cli keyring check` and a quick `chissu-cli capture --json` to verify the new settings.
-
-## Testing
-
-Automated tests exercise frame conversion, JSON serialization, and filesystem handling:
+After editing configuration, run:
 
 ```bash
-cargo fmt
-cargo clippy -- -D warnings
-cargo test --workspace
-cargo test -p chissu-cli
-cargo test -p pam_chissu
+chissu-cli keyring check
+chissu-cli capture --json
 ```
 
-Run `cargo test -p chissu-face-core` when working on the shared library directly. Mocked frame data keeps tests independent of live hardware, but the dlib crates still require the native headers/libraries listed earlier. Without them `dlib-face-recognition` fails to compile.
+## Documentation
 
-## Manual verification with hardware
+- [CLI usage reference](docs/chissu-cli.md)
+- [PAM setup, runtime behavior, and troubleshooting](docs/pam-auth.md)
+- [Manual infrared camera verification](docs/manual-testing.md)
+- [polkit-agent-helper troubleshooting](docs/users-guide/polkit-agent-helper-troubleshooting.md)
+- [Packaging guide](docs/packaging.md)
+- [Release process](docs/releasing.md)
+- [Behavior specs](docs/specs/index.md)
 
-Run through the checklist in [`docs/manual-testing.md`](docs/manual-testing.md) when validating with a physical infrared camera. The document covers capability expectations, recommended exposure/gain values, and example commands for both human and JSON output modes.
+## Development
+
+Workspace layout:
+
+```text
+chissu-pam/
+├── Cargo.toml
+├── crates/
+│   ├── chissu-cli/
+│   ├── chissu-config/
+│   ├── chissu-face-core/
+│   └── pam-chissu/
+└── tests/
+```
+
+Use a repository-local `CARGO_HOME` when running cargo commands:
+
+```bash
+CARGO_HOME="$(pwd)/.cargo-home" cargo build
+CARGO_HOME="$(pwd)/.cargo-home" cargo fmt --check
+CARGO_HOME="$(pwd)/.cargo-home" cargo clippy -- -D warnings
+CARGO_HOME="$(pwd)/.cargo-home" cargo test --workspace
+CARGO_HOME="$(pwd)/.cargo-home" cargo test -p chissu-cli
+CARGO_HOME="$(pwd)/.cargo-home" cargo test -p chissu-face-core
+CARGO_HOME="$(pwd)/.cargo-home" cargo test -p pam-chissu
+```
+
+Tests use mocked frame data where possible, but native dlib dependencies are
+still required to compile the face-recognition bindings.
 
 ## License
 
-This project is distributed under the terms of the [GNU Lesser General Public License v2.1](LICENSE).
+This project is distributed under the terms of the
+[GNU Lesser General Public License v2.1](LICENSE).

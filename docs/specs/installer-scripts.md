@@ -1,7 +1,7 @@
-# installer-scripts Specification
+# installer-scripts Spec
 
 ## Purpose
-TBD - created by archiving change add-linux-install-scripts. Update Purpose after archive.
+Defines the distro-aware installation scripts, shared installer assets, artifact placement, model provisioning, config seeding, and PAM stack wiring behavior.
 ## Requirements
 ### Requirement: Distro-Aware Installer Entry Point
 

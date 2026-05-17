@@ -1,7 +1,7 @@
-# pam-face-auth Specification
+# pam-face-auth Spec
 
 ## Purpose
-TBD - created by archiving change add-pam-face-auth. Update Purpose after archive.
+Defines PAM facial authentication behavior, configuration resolution, target-user embedding isolation, Secret Service access, helper IPC, and syslog audit logging.
 ## Requirements
 ### Requirement: PAM Facial Authentication Module
 The system MUST provide a shared library for PAM authentication named `libpam_chissu.so`, validating a live camera capture against embeddings enrolled for the target user and surfacing embedding terminology in logs/prompts while still accepting legacy descriptor stores.

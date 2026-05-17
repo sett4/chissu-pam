@@ -1,4 +1,4 @@
-# chissu-cli-doctor Specification
+# chissu-cli-doctor Spec
 
 ## Purpose
 

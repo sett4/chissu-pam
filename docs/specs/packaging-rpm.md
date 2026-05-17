@@ -1,7 +1,7 @@
-# packaging-rpm Specification
+# packaging-rpm Spec
 
 ## Purpose
-TBD - created by archiving change add-rpm-package-build. Update Purpose after archive.
+Defines RPM package creation, install-time hooks, dlib model provisioning, prerelease metadata handling, and authselect integration.
 ## Requirements
 ### Requirement: RPM Packaging Script
 The repository MUST ship a helper that produces RPM packages via the standard `rpmbuild` flow.
