@@ -17,19 +17,14 @@ pub const DEFAULT_PIXEL_FORMAT: &str = "Y16";
 pub const DEFAULT_WARMUP_FRAMES: u32 = 4;
 pub const DEFAULT_JITTERS: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SecretServiceSessionMode {
+    #[default]
     Auto,
     #[serde(rename = "x11")]
     X11,
     Wayland,
-}
-
-impl Default for SecretServiceSessionMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

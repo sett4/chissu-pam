@@ -2,6 +2,7 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use chissu_config::{
     self, ConfigError, ResolvedConfig, ResolvedConfigWithSource, PRIMARY_CONFIG_PATH,
@@ -24,6 +25,11 @@ const CHECK_ENCODER_MODEL: &str = "encoder_model";
 const CHECK_SECRET_SERVICE: &str = "secret_service";
 const CHECK_PAM_MODULE: &str = "pam_module";
 const CHECK_PAM_STACK: &str = "pam_stack";
+const CHECK_POLKIT_HELPER_UNIT: &str = "polkit_helper_unit";
+const CHECK_POLKIT_SESSION_BUS_ACCESS: &str = "polkit_session_bus_access";
+const CHECK_POLKIT_VIDEO_DEVICE_ACCESS: &str = "polkit_video_device_access";
+const POLKIT_HELPER_UNIT: &str = "polkit-agent-helper@.service";
+const POLKIT_GUIDE: &str = "docs/users-guide/polkit-agent-helper-troubleshooting.md";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,6 +54,26 @@ pub struct DoctorCheck {
 pub struct DoctorOutcome {
     pub ok: bool,
     pub checks: Vec<DoctorCheck>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DoctorOptions {
+    pub include_polkit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DoctorProfile {
+    Default,
+    Polkit,
+}
+
+impl DoctorOptions {
+    fn includes(self, profile: DoctorProfile) -> bool {
+        match profile {
+            DoctorProfile::Default => true,
+            DoctorProfile::Polkit => self.include_polkit,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -88,10 +114,11 @@ impl DeviceOpener for RealDeviceOpener {
     }
 }
 
-pub struct DoctorContext<P, D> {
+pub struct DoctorContext<P, D, I = RealPolkitInspector> {
     pub paths: DoctorPaths,
     pub secret_service_probe: P,
     pub device_opener: D,
+    pub polkit_inspector: I,
     pub fallback_config: ResolvedConfig,
 }
 
@@ -101,46 +128,334 @@ impl Default for DoctorContext<KeyringSecretServiceProbe, RealDeviceOpener> {
             paths: DoctorPaths::default(),
             secret_service_probe: KeyringSecretServiceProbe,
             device_opener: RealDeviceOpener,
+            polkit_inspector: RealPolkitInspector,
             fallback_config: ResolvedConfig::default(),
         }
     }
 }
 
-pub fn run_doctor() -> AppResult<DoctorOutcome> {
-    let ctx = DoctorContext::default();
-    run_doctor_with(&ctx)
+struct DoctorServices<'a, P, D, I> {
+    paths: &'a DoctorPaths,
+    secret_service_probe: &'a P,
+    device_opener: &'a D,
+    polkit_inspector: &'a I,
+    fallback_config: &'a ResolvedConfig,
 }
 
-pub fn run_doctor_with<P, D>(ctx: &DoctorContext<P, D>) -> AppResult<DoctorOutcome>
+impl<'a, P, D, I> From<&'a DoctorContext<P, D, I>> for DoctorServices<'a, P, D, I> {
+    fn from(ctx: &'a DoctorContext<P, D, I>) -> Self {
+        Self {
+            paths: &ctx.paths,
+            secret_service_probe: &ctx.secret_service_probe,
+            device_opener: &ctx.device_opener,
+            polkit_inspector: &ctx.polkit_inspector,
+            fallback_config: &ctx.fallback_config,
+        }
+    }
+}
+
+#[derive(Default)]
+struct DoctorState {
+    resolved: Option<ResolvedConfigWithSource>,
+    referenced_modules: Vec<PathBuf>,
+    polkit_unit: Option<Result<PolkitUnitSettings, String>>,
+    checks: Vec<DoctorCheck>,
+}
+
+impl DoctorState {
+    fn push(&mut self, check: DoctorCheck) {
+        self.checks.push(check);
+    }
+
+    fn resolved(&self) -> &ResolvedConfigWithSource {
+        self.resolved
+            .as_ref()
+            .expect("config check must run before checks that need resolved config")
+    }
+}
+
+struct DoctorCheckSpec<P, D, I> {
+    name: &'static str,
+    profiles: &'static [DoctorProfile],
+    run: fn(&mut DoctorState, &DoctorServices<'_, P, D, I>),
+}
+
+impl<P, D, I> DoctorCheckSpec<P, D, I> {
+    fn enabled(&self, options: DoctorOptions) -> bool {
+        self.profiles
+            .iter()
+            .any(|profile| options.includes(*profile))
+    }
+}
+
+pub fn run_doctor() -> AppResult<DoctorOutcome> {
+    run_doctor_with_options(DoctorOptions::default())
+}
+
+pub fn run_doctor_with_options(options: DoctorOptions) -> AppResult<DoctorOutcome> {
+    let ctx = DoctorContext::default();
+    run_doctor_with_options_and_context(&ctx, options)
+}
+
+pub fn run_doctor_with<P, D, I>(ctx: &DoctorContext<P, D, I>) -> AppResult<DoctorOutcome>
 where
     P: SecretServiceProbe,
     D: DeviceOpener,
+    I: PolkitInspector,
 {
-    let (config_check, resolved) = check_config(&ctx.paths, &ctx.fallback_config);
+    run_doctor_with_options_and_context(ctx, DoctorOptions::default())
+}
 
-    let mut checks = vec![config_check];
+pub fn run_doctor_with_options_and_context<P, D, I>(
+    ctx: &DoctorContext<P, D, I>,
+    options: DoctorOptions,
+) -> AppResult<DoctorOutcome>
+where
+    P: SecretServiceProbe,
+    D: DeviceOpener,
+    I: PolkitInspector,
+{
+    let services = DoctorServices::from(ctx);
+    let mut state = DoctorState::default();
+    for spec in check_registry() {
+        if spec.enabled(options) {
+            debug_assert!(!spec.name.is_empty());
+            (spec.run)(&mut state, &services);
+        }
+    }
 
-    checks.push(check_video_device(&resolved, &ctx.device_opener));
-    checks.push(check_embedding_dir(&resolved));
-    checks.push(check_model(
+    let ok = state.checks.iter().all(|c| c.status == CheckStatus::Pass);
+
+    Ok(DoctorOutcome {
+        ok,
+        checks: state.checks,
+    })
+}
+
+#[derive(Clone, Copy)]
+pub struct RealPolkitInspector;
+
+pub trait PolkitInspector {
+    fn inspect(&self) -> Result<PolkitUnitSettings, String>;
+}
+
+impl PolkitInspector for RealPolkitInspector {
+    fn inspect(&self) -> Result<PolkitUnitSettings, String> {
+        inspect_polkit_unit()
+    }
+}
+
+const DEFAULT_PROFILE: &[DoctorProfile] = &[DoctorProfile::Default];
+const POLKIT_PROFILE: &[DoctorProfile] = &[DoctorProfile::Polkit];
+
+fn check_registry<P, D, I>() -> [DoctorCheckSpec<P, D, I>; 11]
+where
+    P: SecretServiceProbe,
+    D: DeviceOpener,
+    I: PolkitInspector,
+{
+    [
+        DoctorCheckSpec {
+            name: CHECK_CONFIG,
+            profiles: DEFAULT_PROFILE,
+            run: run_config_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_VIDEO_DEVICE,
+            profiles: DEFAULT_PROFILE,
+            run: run_video_device_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_EMBEDDING_DIR,
+            profiles: DEFAULT_PROFILE,
+            run: run_embedding_dir_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_LANDMARK_MODEL,
+            profiles: DEFAULT_PROFILE,
+            run: run_landmark_model_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_ENCODER_MODEL,
+            profiles: DEFAULT_PROFILE,
+            run: run_encoder_model_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_SECRET_SERVICE,
+            profiles: DEFAULT_PROFILE,
+            run: run_secret_service_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_PAM_STACK,
+            profiles: DEFAULT_PROFILE,
+            run: run_pam_stack_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_PAM_MODULE,
+            profiles: DEFAULT_PROFILE,
+            run: run_pam_module_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_POLKIT_HELPER_UNIT,
+            profiles: POLKIT_PROFILE,
+            run: run_polkit_helper_unit_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_POLKIT_SESSION_BUS_ACCESS,
+            profiles: POLKIT_PROFILE,
+            run: run_polkit_session_bus_access_check,
+        },
+        DoctorCheckSpec {
+            name: CHECK_POLKIT_VIDEO_DEVICE_ACCESS,
+            profiles: POLKIT_PROFILE,
+            run: run_polkit_video_device_access_check,
+        },
+    ]
+}
+
+fn run_config_check<P, D, I>(state: &mut DoctorState, services: &DoctorServices<'_, P, D, I>) {
+    let (check, resolved) = check_config(services.paths, services.fallback_config);
+    state.resolved = Some(resolved);
+    state.push(check);
+}
+
+fn run_video_device_check<P, D, I>(state: &mut DoctorState, services: &DoctorServices<'_, P, D, I>)
+where
+    D: DeviceOpener,
+{
+    state.push(check_video_device(state.resolved(), services.device_opener));
+}
+
+fn run_embedding_dir_check<P, D, I>(
+    state: &mut DoctorState,
+    _services: &DoctorServices<'_, P, D, I>,
+) {
+    state.push(check_embedding_dir(state.resolved()));
+}
+
+fn run_landmark_model_check<P, D, I>(
+    state: &mut DoctorState,
+    _services: &DoctorServices<'_, P, D, I>,
+) {
+    state.push(check_model(
         CHECK_LANDMARK_MODEL,
-        resolved.resolved.landmark_model.as_ref(),
+        state.resolved().resolved.landmark_model.as_ref(),
     ));
-    checks.push(check_model(
+}
+
+fn run_encoder_model_check<P, D, I>(
+    state: &mut DoctorState,
+    _services: &DoctorServices<'_, P, D, I>,
+) {
+    state.push(check_model(
         CHECK_ENCODER_MODEL,
-        resolved.resolved.encoder_model.as_ref(),
+        state.resolved().resolved.encoder_model.as_ref(),
     ));
-    checks.push(check_secret_service(&ctx.secret_service_probe));
-    let (pam_stack_check, referenced_modules) = check_pam_stack(&ctx.paths.pamd_dir);
-    checks.push(pam_stack_check);
-    checks.push(check_pam_module(
-        referenced_modules.as_slice(),
-        &ctx.paths.pam_module_paths,
+}
+
+fn run_secret_service_check<P, D, I>(
+    state: &mut DoctorState,
+    services: &DoctorServices<'_, P, D, I>,
+) where
+    P: SecretServiceProbe,
+{
+    state.push(check_secret_service(services.secret_service_probe));
+}
+
+fn run_pam_stack_check<P, D, I>(state: &mut DoctorState, services: &DoctorServices<'_, P, D, I>) {
+    let (check, referenced_modules) = check_pam_stack(&services.paths.pamd_dir);
+    state.referenced_modules = referenced_modules;
+    state.push(check);
+}
+
+fn run_pam_module_check<P, D, I>(state: &mut DoctorState, services: &DoctorServices<'_, P, D, I>) {
+    state.push(check_pam_module(
+        state.referenced_modules.as_slice(),
+        &services.paths.pam_module_paths,
     ));
+}
 
-    let ok = checks.iter().all(|c| c.status == CheckStatus::Pass);
+fn run_polkit_helper_unit_check<P, D, I>(
+    state: &mut DoctorState,
+    services: &DoctorServices<'_, P, D, I>,
+) where
+    I: PolkitInspector,
+{
+    let check = match polkit_unit_result(state, services) {
+        Ok(settings) => check_polkit_helper_unit(&settings),
+        Err(message) => DoctorCheck {
+            name: CHECK_POLKIT_HELPER_UNIT.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Could not inspect {POLKIT_HELPER_UNIT}: {message}; see {POLKIT_GUIDE}"
+            ),
+            path: None,
+            device: None,
+        },
+    };
+    state.push(check);
+}
 
-    Ok(DoctorOutcome { ok, checks })
+fn run_polkit_session_bus_access_check<P, D, I>(
+    state: &mut DoctorState,
+    services: &DoctorServices<'_, P, D, I>,
+) where
+    I: PolkitInspector,
+{
+    let check = match polkit_unit_result(state, services) {
+        Ok(settings) => check_polkit_session_bus_access(&settings),
+        Err(_) => DoctorCheck {
+            name: CHECK_POLKIT_SESSION_BUS_ACCESS.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Skipped session bus sandbox check because {POLKIT_HELPER_UNIT} could not be inspected"
+            ),
+            path: Some("/run/user".into()),
+            device: None,
+        },
+    };
+    state.push(check);
+}
+
+fn run_polkit_video_device_access_check<P, D, I>(
+    state: &mut DoctorState,
+    services: &DoctorServices<'_, P, D, I>,
+) where
+    I: PolkitInspector,
+{
+    let device = display_device(&DeviceLocator::from_option(Some(
+        state.resolved().resolved.video_device.clone(),
+    )));
+    let check = match polkit_unit_result(state, services) {
+        Ok(settings) => check_polkit_video_device_access(&settings, &device),
+        Err(_) => DoctorCheck {
+            name: CHECK_POLKIT_VIDEO_DEVICE_ACCESS.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Skipped video device sandbox check because {POLKIT_HELPER_UNIT} could not be inspected"
+            ),
+            path: None,
+            device: Some(device),
+        },
+    };
+    state.push(check);
+}
+
+fn polkit_unit_result<P, D, I>(
+    state: &mut DoctorState,
+    services: &DoctorServices<'_, P, D, I>,
+) -> Result<PolkitUnitSettings, String>
+where
+    I: PolkitInspector,
+{
+    if state.polkit_unit.is_none() {
+        state.polkit_unit = Some(services.polkit_inspector.inspect());
+    }
+    state
+        .polkit_unit
+        .as_ref()
+        .expect("polkit unit inspection result initialized")
+        .clone()
 }
 
 fn check_config(
@@ -517,6 +832,272 @@ fn check_pam_stack(pamd_dir: &Path) -> (DoctorCheck, Vec<PathBuf>) {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PolkitUnitSettings {
+    load_state: Option<String>,
+    protect_home: Option<String>,
+    bind_read_only_paths: Vec<String>,
+    bind_paths: Vec<String>,
+    private_devices: Option<String>,
+    device_policy: Option<String>,
+    device_allow: Vec<String>,
+    source: String,
+}
+
+fn check_polkit_helper_unit(settings: &PolkitUnitSettings) -> DoctorCheck {
+    if polkit_unit_unavailable(settings) {
+        return DoctorCheck {
+            name: CHECK_POLKIT_HELPER_UNIT.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "{POLKIT_HELPER_UNIT} load state is {}; polkit prompts may use a different helper on this system",
+                settings.load_state.as_deref().unwrap_or("unknown")
+            ),
+            path: None,
+            device: None,
+        };
+    }
+
+    DoctorCheck {
+        name: CHECK_POLKIT_HELPER_UNIT.into(),
+        status: CheckStatus::Pass,
+        message: format!("Inspected {POLKIT_HELPER_UNIT} via {}", settings.source),
+        path: None,
+        device: None,
+    }
+}
+
+fn check_polkit_session_bus_access(settings: &PolkitUnitSettings) -> DoctorCheck {
+    if polkit_unit_unavailable(settings) {
+        return DoctorCheck {
+            name: CHECK_POLKIT_SESSION_BUS_ACCESS.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Skipped session bus sandbox check because {POLKIT_HELPER_UNIT} is not loaded"
+            ),
+            path: Some("/run/user".into()),
+            device: None,
+        };
+    }
+
+    let protect_home = settings.protect_home.as_deref().unwrap_or("unset");
+    let hides_runtime = matches!(protect_home, "yes" | "read-only" | "tmpfs");
+    let has_runtime_bind = contains_bound_path(&settings.bind_read_only_paths, "/run/user")
+        || contains_bound_path(&settings.bind_paths, "/run/user");
+
+    if hides_runtime && !has_runtime_bind {
+        return DoctorCheck {
+            name: CHECK_POLKIT_SESSION_BUS_ACCESS.into(),
+            status: CheckStatus::Fail,
+            message: format!(
+                "{POLKIT_HELPER_UNIT} sets ProtectHome={protect_home} without BindReadOnlyPaths=/run/user; Secret Service bus access may fail. See {POLKIT_GUIDE}"
+            ),
+            path: Some("/run/user".into()),
+            device: None,
+        };
+    }
+
+    DoctorCheck {
+        name: CHECK_POLKIT_SESSION_BUS_ACCESS.into(),
+        status: CheckStatus::Pass,
+        message: format!(
+            "{POLKIT_HELPER_UNIT} exposes /run/user for recovered Secret Service session bus access"
+        ),
+        path: Some("/run/user".into()),
+        device: None,
+    }
+}
+
+fn check_polkit_video_device_access(settings: &PolkitUnitSettings, device: &str) -> DoctorCheck {
+    if polkit_unit_unavailable(settings) {
+        return DoctorCheck {
+            name: CHECK_POLKIT_VIDEO_DEVICE_ACCESS.into(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Skipped video device sandbox check because {POLKIT_HELPER_UNIT} is not loaded"
+            ),
+            path: None,
+            device: Some(device.into()),
+        };
+    }
+
+    let mut failures = Vec::new();
+    if matches!(settings.private_devices.as_deref(), Some("yes" | "true"))
+        && !contains_bound_path(&settings.bind_paths, device)
+    {
+        failures.push(format!("PrivateDevices=yes without BindPaths={device}"));
+    }
+    if matches!(settings.device_policy.as_deref(), Some("strict" | "closed"))
+        && !device_allow_contains_rw(&settings.device_allow, device)
+    {
+        failures.push(format!(
+            "DevicePolicy={} without DeviceAllow={device} rw",
+            settings.device_policy.as_deref().unwrap_or("strict")
+        ));
+    }
+
+    if failures.is_empty() {
+        DoctorCheck {
+            name: CHECK_POLKIT_VIDEO_DEVICE_ACCESS.into(),
+            status: CheckStatus::Pass,
+            message: format!("{POLKIT_HELPER_UNIT} allows configured video device {device}"),
+            path: None,
+            device: Some(device.into()),
+        }
+    } else {
+        DoctorCheck {
+            name: CHECK_POLKIT_VIDEO_DEVICE_ACCESS.into(),
+            status: CheckStatus::Fail,
+            message: format!(
+                "{}; polkit camera capture may fail. See {POLKIT_GUIDE}",
+                failures.join("; ")
+            ),
+            path: None,
+            device: Some(device.into()),
+        }
+    }
+}
+
+fn inspect_polkit_unit() -> Result<PolkitUnitSettings, String> {
+    let show = Command::new("systemctl")
+        .args([
+            "show",
+            POLKIT_HELPER_UNIT,
+            "-p",
+            "LoadState",
+            "-p",
+            "ProtectHome",
+            "-p",
+            "BindReadOnlyPaths",
+            "-p",
+            "BindPaths",
+            "-p",
+            "PrivateDevices",
+            "-p",
+            "DevicePolicy",
+            "-p",
+            "DeviceAllow",
+            "--no-pager",
+        ])
+        .output();
+
+    match show {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Ok(parse_systemctl_show(&stdout));
+        }
+        Ok(_) | Err(_) => {}
+    }
+
+    let cat = Command::new("systemctl")
+        .args(["cat", POLKIT_HELPER_UNIT])
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !cat.status.success() {
+        return Err(String::from_utf8_lossy(&cat.stderr).trim().to_string());
+    }
+    Ok(parse_systemctl_cat(&String::from_utf8_lossy(&cat.stdout)))
+}
+
+fn parse_systemctl_show(contents: &str) -> PolkitUnitSettings {
+    let mut settings = PolkitUnitSettings {
+        source: "systemctl show".into(),
+        ..PolkitUnitSettings::default()
+    };
+    for line in contents.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        apply_polkit_setting(&mut settings, key.trim(), value.trim());
+    }
+    settings
+}
+
+fn polkit_unit_unavailable(settings: &PolkitUnitSettings) -> bool {
+    matches!(settings.load_state.as_deref(), Some("not-found" | "masked"))
+}
+
+fn parse_systemctl_cat(contents: &str) -> PolkitUnitSettings {
+    let mut settings = PolkitUnitSettings {
+        source: "systemctl cat".into(),
+        ..PolkitUnitSettings::default()
+    };
+    for line in contents.lines() {
+        let active = line.split('#').next().map(str::trim).unwrap_or("");
+        if active.is_empty() || active.starts_with('[') {
+            continue;
+        }
+        let Some((key, value)) = active.split_once('=') else {
+            continue;
+        };
+        apply_polkit_setting(&mut settings, key.trim(), value.trim());
+    }
+    settings
+}
+
+fn apply_polkit_setting(settings: &mut PolkitUnitSettings, key: &str, value: &str) {
+    match key {
+        "LoadState" => settings.load_state = non_empty(value),
+        "ProtectHome" => settings.protect_home = non_empty(value),
+        "BindReadOnlyPaths" => apply_systemd_list(&mut settings.bind_read_only_paths, value),
+        "BindPaths" => apply_systemd_list(&mut settings.bind_paths, value),
+        "PrivateDevices" => settings.private_devices = non_empty(value),
+        "DevicePolicy" => settings.device_policy = non_empty(value),
+        "DeviceAllow" => {
+            if value.is_empty() {
+                settings.device_allow.clear();
+            } else {
+                settings.device_allow.push(value.into());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn non_empty(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.into())
+    }
+}
+
+fn split_systemd_list(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn apply_systemd_list(target: &mut Vec<String>, value: &str) {
+    if value.is_empty() {
+        target.clear();
+    } else {
+        target.extend(split_systemd_list(value));
+    }
+}
+
+fn contains_bound_path(entries: &[String], needle: &str) -> bool {
+    entries.iter().any(|entry| {
+        let source = entry.split(':').next().unwrap_or(entry);
+        source == needle || needle.starts_with(&format!("{source}/"))
+    })
+}
+
+fn device_allow_contains_rw(entries: &[String], device: &str) -> bool {
+    entries.iter().any(|entry| {
+        let parts = entry.split_whitespace().collect::<Vec<_>>();
+        parts.iter().enumerate().any(|(index, part)| {
+            *part == device
+                && parts[index + 1..]
+                    .iter()
+                    .take_while(|candidate| !candidate.starts_with('/'))
+                    .any(|candidate| candidate.contains('r') && candidate.contains('w'))
+        })
+    })
+}
+
 fn display_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -626,6 +1207,17 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct StubPolkitInspector {
+        result: Result<PolkitUnitSettings, String>,
+    }
+
+    impl PolkitInspector for StubPolkitInspector {
+        fn inspect(&self) -> Result<PolkitUnitSettings, String> {
+            self.result.clone()
+        }
+    }
+
     fn base_paths(tmp: &Path) -> DoctorPaths {
         DoctorPaths {
             config_paths: vec![tmp.join("config.toml")],
@@ -675,9 +1267,32 @@ mod tests {
             paths,
             secret_service_probe: probe,
             device_opener: StubDeviceOpener { ok: device_ok },
+            polkit_inspector: StubPolkitInspector {
+                result: Err("not used".into()),
+            },
             fallback_config: fallback,
         };
         run_doctor_with(&ctx).unwrap()
+    }
+
+    fn doctor_with_options(
+        paths: DoctorPaths,
+        probe: StubProbe,
+        device_ok: bool,
+        fallback: ResolvedConfig,
+        options: DoctorOptions,
+        polkit_result: Result<PolkitUnitSettings, String>,
+    ) -> DoctorOutcome {
+        let ctx = DoctorContext {
+            paths,
+            secret_service_probe: probe,
+            device_opener: StubDeviceOpener { ok: device_ok },
+            polkit_inspector: StubPolkitInspector {
+                result: polkit_result,
+            },
+            fallback_config: fallback,
+        };
+        run_doctor_with_options_and_context(&ctx, options).unwrap()
     }
 
     fn status<'a>(checks: &'a [DoctorCheck], name: &str) -> &'a DoctorCheck {
@@ -685,6 +1300,63 @@ mod tests {
             .iter()
             .find(|c| c.name == name)
             .expect("check present")
+    }
+
+    fn registry_names(options: DoctorOptions) -> Vec<&'static str> {
+        check_registry::<StubProbe, StubDeviceOpener, StubPolkitInspector>()
+            .into_iter()
+            .filter(|spec| spec.enabled(options))
+            .map(|spec| spec.name)
+            .collect()
+    }
+
+    fn check_names(outcome: &DoctorOutcome) -> Vec<&str> {
+        outcome
+            .checks
+            .iter()
+            .map(|check| check.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn registry_default_profile_excludes_polkit_checks() {
+        assert_eq!(
+            registry_names(DoctorOptions {
+                include_polkit: false
+            }),
+            vec![
+                CHECK_CONFIG,
+                CHECK_VIDEO_DEVICE,
+                CHECK_EMBEDDING_DIR,
+                CHECK_LANDMARK_MODEL,
+                CHECK_ENCODER_MODEL,
+                CHECK_SECRET_SERVICE,
+                CHECK_PAM_STACK,
+                CHECK_PAM_MODULE,
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_polkit_profile_appends_polkit_checks() {
+        assert_eq!(
+            registry_names(DoctorOptions {
+                include_polkit: true
+            }),
+            vec![
+                CHECK_CONFIG,
+                CHECK_VIDEO_DEVICE,
+                CHECK_EMBEDDING_DIR,
+                CHECK_LANDMARK_MODEL,
+                CHECK_ENCODER_MODEL,
+                CHECK_SECRET_SERVICE,
+                CHECK_PAM_STACK,
+                CHECK_PAM_MODULE,
+                CHECK_POLKIT_HELPER_UNIT,
+                CHECK_POLKIT_SESSION_BUS_ACCESS,
+                CHECK_POLKIT_VIDEO_DEVICE_ACCESS,
+            ]
+        );
     }
 
     #[test]
@@ -712,6 +1384,19 @@ mod tests {
         );
 
         assert!(outcome.ok, "statuses: {:?}", outcome.checks);
+        assert_eq!(
+            check_names(&outcome),
+            vec![
+                CHECK_CONFIG,
+                CHECK_VIDEO_DEVICE,
+                CHECK_EMBEDDING_DIR,
+                CHECK_LANDMARK_MODEL,
+                CHECK_ENCODER_MODEL,
+                CHECK_SECRET_SERVICE,
+                CHECK_PAM_STACK,
+                CHECK_PAM_MODULE,
+            ]
+        );
         assert_eq!(
             status(&outcome.checks, CHECK_CONFIG).status,
             CheckStatus::Pass
@@ -903,6 +1588,47 @@ mod tests {
     }
 
     #[test]
+    fn pam_module_check_uses_module_path_discovered_by_pam_stack() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"{}\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("video0").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+        fs::remove_file(tmp.path().join("libpam_chissu.so")).unwrap();
+        let referenced_module = tmp.path().join("custom/libpam_chissu.so");
+        fs::create_dir_all(referenced_module.parent().unwrap()).unwrap();
+        File::create(&referenced_module).unwrap();
+        fs::set_permissions(&referenced_module, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::write(
+            tmp.path().join("pam.d/login"),
+            format!("auth sufficient {}\n", referenced_module.display()),
+        )
+        .unwrap();
+
+        let outcome = doctor_with(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+        );
+
+        let check = status(&outcome.checks, CHECK_PAM_MODULE);
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(
+            check.path.as_deref(),
+            Some(referenced_module.to_str().unwrap())
+        );
+    }
+
+    #[test]
     fn doctor_accepts_sticky_non_listable_embedding_dir() {
         let tmp = tempdir().unwrap();
         write_fixtures(tmp.path());
@@ -1010,5 +1736,214 @@ mod tests {
             status(&outcome.checks, CHECK_PAM_MODULE).status,
             CheckStatus::Fail
         );
+    }
+
+    #[test]
+    fn plain_doctor_does_not_include_polkit_checks() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"{}\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("video0").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+
+        let outcome = doctor_with(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+        );
+
+        assert!(outcome
+            .checks
+            .iter()
+            .all(|check| !check.name.starts_with("polkit_")));
+    }
+
+    #[test]
+    fn polkit_doctor_includes_polkit_checks() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+        fs::write(
+            tmp.path().join("config.toml"),
+            format!(
+                "embedding_store_dir = \"{}\"\nvideo_device = \"/dev/video2\"\nlandmark_model = \"{}\"\nencoder_model = \"{}\"\n",
+                tmp.path().join("store").display(),
+                tmp.path().join("landmark.dat").display(),
+                tmp.path().join("encoder.dat").display()
+            ),
+        )
+        .unwrap();
+
+        let outcome = doctor_with_options(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+            DoctorOptions {
+                include_polkit: true,
+            },
+            Ok(recommended_polkit_settings()),
+        );
+
+        assert_eq!(
+            check_names(&outcome),
+            vec![
+                CHECK_CONFIG,
+                CHECK_VIDEO_DEVICE,
+                CHECK_EMBEDDING_DIR,
+                CHECK_LANDMARK_MODEL,
+                CHECK_ENCODER_MODEL,
+                CHECK_SECRET_SERVICE,
+                CHECK_PAM_STACK,
+                CHECK_PAM_MODULE,
+                CHECK_POLKIT_HELPER_UNIT,
+                CHECK_POLKIT_SESSION_BUS_ACCESS,
+                CHECK_POLKIT_VIDEO_DEVICE_ACCESS,
+            ]
+        );
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_HELPER_UNIT).status,
+            CheckStatus::Pass
+        );
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_SESSION_BUS_ACCESS).status,
+            CheckStatus::Pass
+        );
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_VIDEO_DEVICE_ACCESS).status,
+            CheckStatus::Pass
+        );
+    }
+
+    #[test]
+    fn strict_polkit_unit_fails_bus_and_camera_checks() {
+        let settings = parse_systemctl_cat(
+            r#"
+[Service]
+ProtectHome=yes
+PrivateDevices=yes
+DevicePolicy=strict
+DeviceAllow=/dev/null rw
+"#,
+        );
+
+        assert_eq!(
+            check_polkit_session_bus_access(&settings).status,
+            CheckStatus::Fail
+        );
+        assert_eq!(
+            check_polkit_video_device_access(&settings, "/dev/video2").status,
+            CheckStatus::Fail
+        );
+    }
+
+    #[test]
+    fn recommended_polkit_override_passes_bus_and_camera_checks() {
+        let settings = recommended_polkit_settings();
+
+        assert_eq!(
+            check_polkit_session_bus_access(&settings).status,
+            CheckStatus::Pass
+        );
+        assert_eq!(
+            check_polkit_video_device_access(&settings, "/dev/video2").status,
+            CheckStatus::Pass
+        );
+    }
+
+    #[test]
+    fn polkit_video_check_fails_when_camera_allow_is_missing() {
+        let settings = parse_systemctl_show(
+            r#"
+LoadState=loaded
+ProtectHome=tmpfs
+BindReadOnlyPaths=/run/user
+BindPaths=/dev/video2
+PrivateDevices=yes
+DevicePolicy=strict
+DeviceAllow=/dev/null rw
+"#,
+        );
+
+        let check = check_polkit_video_device_access(&settings, "/dev/video2");
+
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(check.message.contains("DevicePolicy=strict"));
+    }
+
+    #[test]
+    fn unavailable_polkit_unit_reports_warnings() {
+        let tmp = tempdir().unwrap();
+        write_fixtures(tmp.path());
+
+        let outcome = doctor_with_options(
+            base_paths(tmp.path()),
+            StubProbe { result: Ok(()) },
+            true,
+            resolved_for(tmp.path()),
+            DoctorOptions {
+                include_polkit: true,
+            },
+            Err("systemctl unavailable".into()),
+        );
+
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_HELPER_UNIT).status,
+            CheckStatus::Warn
+        );
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_SESSION_BUS_ACCESS).status,
+            CheckStatus::Warn
+        );
+        assert_eq!(
+            status(&outcome.checks, CHECK_POLKIT_VIDEO_DEVICE_ACCESS).status,
+            CheckStatus::Warn
+        );
+    }
+
+    #[test]
+    fn missing_polkit_unit_skips_dependent_checks() {
+        let settings = parse_systemctl_show("LoadState=not-found\n");
+
+        assert_eq!(
+            check_polkit_helper_unit(&settings).status,
+            CheckStatus::Warn
+        );
+        assert_eq!(
+            check_polkit_session_bus_access(&settings).status,
+            CheckStatus::Warn
+        );
+        assert_eq!(
+            check_polkit_video_device_access(&settings, "/dev/video2").status,
+            CheckStatus::Warn
+        );
+    }
+
+    fn recommended_polkit_settings() -> PolkitUnitSettings {
+        parse_systemctl_cat(
+            r#"
+# /usr/lib/systemd/system/polkit-agent-helper@.service
+[Service]
+ProtectHome=yes
+PrivateDevices=yes
+DevicePolicy=strict
+DeviceAllow=/dev/null rw
+
+# /etc/systemd/system/polkit-agent-helper@.service.d/override.conf
+[Service]
+ProtectHome=tmpfs
+BindReadOnlyPaths=/run/user
+BindPaths=/dev/video2
+DeviceAllow=/dev/video2 rw
+"#,
+        )
     }
 }

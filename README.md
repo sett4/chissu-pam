@@ -280,10 +280,13 @@ Run a quick, non-destructive diagnostic to confirm PAM + enrollment prerequisite
 
 ```bash
 chissu-cli doctor            # human-readable
+chissu-cli doctor --polkit   # include polkit-agent-helper sandbox checks
 chissu-cli --json doctor | jq
 ```
 
 Checks include config discovery/parse, video device access, embedding store permissions, dlib model readability, Secret Service availability, the PAM module location, and whether `/etc/pam.d/*` references `pam_chissu`. Exit code is `0` only when every check passes; warnings (e.g., both config files present) or failures return `1` with details per check.
+
+Add `--polkit` when debugging 1Password or other polkit-based desktop prompts. The extra checks inspect `polkit-agent-helper@.service` and report sandbox settings that can hide `/run/user/<uid>/bus` or the configured camera device; see [Polkit Agent Helper Troubleshooting](docs/users-guide/polkit-agent-helper-troubleshooting.md) for the matching systemd drop-in guidance.
 
 ### Enroll with live capture (`chissu-cli enroll`)
 

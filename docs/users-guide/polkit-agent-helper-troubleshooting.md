@@ -27,6 +27,10 @@ You can also inspect the polkit helper unit:
 systemctl cat polkit-agent-helper@.service
 ```
 
+`chissu-cli doctor --polkit` performs the same read-only inspection and reports
+whether the effective sandbox appears to hide `/run/user` or the configured
+camera device.
+
 Look for sandboxing options such as:
 
 ```ini

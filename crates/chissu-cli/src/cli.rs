@@ -37,7 +37,14 @@ pub enum Commands {
     #[command(subcommand)]
     Keyring(KeyringCommands),
     /// Run environment diagnostics for PAM and enrollment prerequisites
-    Doctor,
+    Doctor(DoctorArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DoctorArgs {
+    /// Include polkit-agent-helper systemd sandbox diagnostics
+    #[arg(long)]
+    pub polkit: bool,
 }
 
 #[derive(Debug, Subcommand)]
