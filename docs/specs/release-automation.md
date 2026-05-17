@@ -1,7 +1,7 @@
-# release-automation Specification
+# release-automation Spec
 
 ## Purpose
-TBD - created by archiving change add-release-deb-workflow. Update Purpose after archive.
+Defines tag-triggered release automation for Debian/Ubuntu and RPM artifacts, GitHub Release asset publishing, and maintainer release documentation.
 ## Requirements
 ### Requirement: Tag-triggered Deb Packages
 GitHub Actions MUST produce Debian-compatible packages whenever a supported semver tag is pushed.

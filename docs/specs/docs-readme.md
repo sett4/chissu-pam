@@ -1,7 +1,7 @@
-# docs-readme Specification
+# docs-readme Spec
 
 ## Purpose
-TBD - created by archiving change update-readme-toc. Update Purpose after archive.
+Defines the expected README and documentation coverage for project onboarding, prerequisites, installation, Specs, usage, configuration, and release guidance.
 ## Requirements
 ### Requirement: README Table Of Contents
 The README MUST expose a table of contents after the opening overview so readers can jump to the canonical sections called out below.
@@ -9,7 +9,7 @@ The README MUST expose a table of contents after the opening overview so readers
 #### Scenario: Maintainer sees canonical sections
 - **GIVEN** a maintainer opens README.md
 - **WHEN** they scroll past the introduction
-- **THEN** they see a Markdown list of links covering (at least) Overview, Why This Project, Getting Started, Usage, Configuration, Testing, and License anchors in that order.
+- **THEN** they see a Markdown list of links covering (at least) Overview, Why This Project, Getting Started, Workspace Layout, Specs, Usage, Configuration, Testing, and License anchors in that order.
 
 ### Requirement: Why This Project Highlights Secret Service Security
 The README MUST explain why the project is secure by design, emphasizing Secret Service–backed embedding encryption and the reduced need for root.
@@ -53,4 +53,4 @@ A dedicated Configuration section MUST explain `chissu-pam` TOML files, preceden
 
 #### Scenario: Config precedence documented
 - **WHEN** an operator opens the Configuration section
-- **THEN** it lists `/etc/chussu-pam/config.toml` and `/usr/local/etc/chussu-pam/config.toml`, describes how CLI/PAM fall back across them, and highlights important keys (device, pixel format, embedding_store_dir with legacy descriptor_store_dir alias, similarity thresholds, Secret Service toggles, etc.).
+- **THEN** it lists `/etc/chissu-pam/config.toml` and `/usr/local/etc/chissu-pam/config.toml`, describes how CLI/PAM fall back across them, and highlights important keys (device, pixel format, embedding_store_dir with legacy descriptor_store_dir alias, similarity thresholds, Secret Service toggles, etc.).

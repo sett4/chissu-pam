@@ -14,6 +14,7 @@ This repository is in an early, exploratory phase: interfaces move quickly, pers
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Workspace Layout](#workspace-layout)
+- [Specs](#specs)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -263,6 +264,10 @@ chissu-pam/
 - Each crate owns a local `tests/` directory for component-scoped coverage (`cargo test -p <crate>`).
 - Repository-level integration tests that touch multiple crates stay under the top-level `tests/` directory and run via `cargo test --workspace`.
 - All crates inherit shared metadata (version, edition) from `[workspace.package]` in the root manifest, so changes only need to be made once.
+
+## Specs
+
+Current behavior specs live under [docs/specs](docs/specs/index.md). Update the relevant Spec alongside code or documentation changes that alter CLI, PAM, packaging, release, or workspace behavior.
 
 ## Building
 

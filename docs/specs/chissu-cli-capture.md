@@ -1,7 +1,7 @@
-# chissu-cli-capture Specification
+# chissu-cli-capture Spec
 
 ## Purpose
-Defines the shared capture behaviors for `chissu-cli` capture subcommands (device defaults, auto exposure/gain, warm-up handling, diagnostics, and binary naming) that other capabilities reference.
+Defines the shared capture behaviors for `chissu-cli` capture subcommands (device defaults, auto exposure/gain, warm-up handling, diagnostics, and binary naming) that other Specs reference.
 ## Requirements
 ### Requirement: Auto Exposure And Gain Controls
 The CLI SHALL let callers opt into device-provided automatic exposure and gain adjustments before capturing a frame.
@@ -48,15 +48,15 @@ The capture CLI MUST reuse the shared TOML configuration loader provided by the 
 - **THEN** the capture CLI automatically observes the same precedence, parse failures, and logging semantics as the PAM module without duplicating loader code.
 
 ### Requirement: CLI Binary Naming
-The workspace MUST continue to emit a `chissu-cli` binary name for all build profiles so capability-focused specs remain accurate regardless of how many capture modes exist.
+The workspace MUST continue to emit a `chissu-cli` binary name for all build profiles so capture-related Specs remain accurate regardless of how many capture modes exist.
 
 #### Scenario: Future capture modes reuse binary naming
-- **GIVEN** maintainers add a new capture capability (e.g., RGB capture)
+- **GIVEN** maintainers add a new capture mode (e.g., RGB capture)
 - **WHEN** they build the workspace in debug or release mode
 - **THEN** the resulting binary remains `chissu-cli`, ensuring documentation in sibling specs stays correct without additional edits.
 
 ### Requirement: Secret Service Diagnostics Command
-The Secret Service diagnostic subcommand MUST remain defined in this capability even when other capture modes are introduced, and sibling specs SHALL reference it instead of redefining command semantics.
+The Secret Service diagnostic subcommand MUST remain defined in this Spec even when other capture modes are introduced, and sibling Specs SHALL reference it instead of redefining command semantics.
 
 #### Scenario: Infrared spec links to diagnostics
 - **GIVEN** operators follow the `infrared-capture` documentation to verify their environment
@@ -64,23 +64,23 @@ The Secret Service diagnostic subcommand MUST remain defined in this capability 
 - **THEN** the diagnostic behavior is defined only once in `chissu-cli-capture`, and the infrared spec simply references it rather than redefining command semantics.
 
 ### Requirement: Shared Capture CLI Behavior
-Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors that live in the `chissu-cli-capture` capability: built-in defaults (device `/dev/video0`, pixel format `Y16`, four warm-up frames), config-file overrides, warm-up frame discarding, and dual output modes (`--json` vs human-readable).
+Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors that live in the `chissu-cli-capture` Spec: built-in defaults (device `/dev/video0`, pixel format `Y16`, four warm-up frames), config-file overrides, warm-up frame discarding, and dual output modes (`--json` vs human-readable).
 
 #### Scenario: Any capture mode honors shared defaults
 - **GIVEN** `chissu-cli capture --json` is invoked without explicit `--device`, `--pixel-format`, or `--warmup-frames`
-- **WHEN** the capability referenced by the command needs those values
+- **WHEN** the command needs those values
 - **THEN** the CLI resolves them using the shared default/config logic defined in `chissu-cli-capture`
-- **AND** any capability-specific spec (e.g., `infrared-capture`) may only override values it explicitly documents.
+- **AND** any mode-specific Spec may only override values it explicitly documents.
 
-### Requirement: Capture CLI Capability Scope Declaration
-- The capability MUST be named `chissu-cli-capture` and MUST own shared capture behaviors (defaults, auto controls, keyring diagnostics, binary naming) plus infrared capture rules, excluding doctor command requirements.
+### Requirement: Capture CLI Spec Scope Declaration
+- The Spec MUST be named `chissu-cli-capture` and MUST own shared capture behaviors (defaults, auto controls, keyring diagnostics, binary naming) plus infrared capture rules, excluding doctor command requirements.
 
 #### Scenario: Capture-only scope documented
 - **WHEN** contributors look up where shared capture behaviors live
-- **THEN** they see the capability called `chissu-cli-capture` and find both shared and infrared capture requirements here, with doctor behavior separated.
+- **THEN** they see the Spec called `chissu-cli-capture` and find both shared and infrared capture requirements here, with doctor behavior separated.
 
 ### Requirement: Infrared Still Capture Command
-- The `chissu-cli capture` capability MUST include infrared still capture behavior formerly scoped to `infrared-capture`, covering IR-specific persistence under `./captures/`, flag handling, and format negotiation.
+- The `chissu-cli capture` Spec MUST include infrared still capture behavior, covering IR-specific persistence under `./captures/`, flag handling, and format negotiation.
 
 #### Scenario: Command defers to shared CLI behavior
 - **GIVEN** the operator runs `chissu-cli capture` without additional flags
@@ -88,7 +88,7 @@ Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors th
 - **THEN** base defaults/logging come from shared capture behavior, while the IR flow ensures the frame saved to `./captures/<timestamp>.png` uses the negotiated infrared pixel format.
 
 ### Requirement: Infrared Device Capability Validation
-- The capture capability MUST interrogate V4L2 capabilities and refuse infrared capture until device features and formats are confirmed.
+- The capture flow MUST interrogate V4L2 capabilities and refuse infrared capture until device features and formats are confirmed.
 
 #### Scenario: Capability check precedes capture
 - **WHEN** the command starts
@@ -119,7 +119,7 @@ Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors th
 ### Requirement: Infrared Testable Capture Flow
 - Infrared tests MUST validate IR-specific logic plus shared capture behavior using mocked/recorded frames.
 
-#### Scenario: Mock test enforces cross-capability contract
+#### Scenario: Mock test enforces shared capture contract
 - **GIVEN** `cargo test` runs an infrared capture test with recorded frames
 - **WHEN** it verifies file writing and metadata
 - **THEN** the test asserts warm-up discard and JSON schema per shared behavior, demonstrating extension without forking.
@@ -130,5 +130,4 @@ Every capture-oriented subcommand SHALL inherit a single set of CLI behaviors th
 #### Scenario: Contributors know where to edit shared vs IR logic
 - **GIVEN** a maintainer needs to tweak warm-up logic or IR-specific validation
 - **WHEN** they inspect capture specs
-- **THEN** they see IR requirements within `chissu-cli-capture`, not a separate capability.
-
+- **THEN** they see IR requirements within `chissu-cli-capture`, not a separate Spec.

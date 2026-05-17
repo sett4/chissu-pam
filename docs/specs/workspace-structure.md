@@ -1,7 +1,7 @@
-# workspace-structure Specification
+# workspace-structure Spec
 
 ## Purpose
-TBD - created by archiving change refactor-workspace-layout. Update Purpose after archive.
+Defines Cargo workspace boundaries, crate placement, shared manifest metadata, and test directory ownership.
 ## Requirements
 ### Requirement: Workspace Manifest Separation
 The repository root MUST contain a workspace-only `Cargo.toml` that declares member crates and shared metadata without defining its own package.
@@ -41,4 +41,3 @@ Each crate MUST own a local `tests/` directory for component-scoped coverage whi
 - **WHEN** a test exercises both the CLI and PAM module together
 - **THEN** it is added to the repository-level `tests/` directory
 - **AND** `cargo test --workspace` executes it once against the workspace, independent of per-crate `tests/` folders.
-
