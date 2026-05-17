@@ -10,3 +10,5 @@ embedding_store_dir = "/var/lib/chissu-pam/embeddings"
 landmark_model = "/var/lib/chissu-pam/dlib-models/shape_predictor_68_face_landmarks.dat"
 encoder_model = "/var/lib/chissu-pam/dlib-models/dlib_face_recognition_resnet_model_v1.dat"
 require_secret_service = true
+# Secret Service session environment mode: "auto", "x11", or "wayland".
+secret_service_session = "auto"

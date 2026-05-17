@@ -17,6 +17,14 @@ The doctor subcommand MUST validate runtime prerequisites, emit human-readable a
 - **AND** prints per-check statuses (`pass`/`warn`/`fail`) with reasons
 - **AND** returns exit code 0 only when all checks are `pass`, exits 1 otherwise.
 
+#### Scenario: Optional polkit helper sandbox diagnostics
+
+- **WHEN** an operator runs `chissu-cli doctor --polkit` (optionally with `--json`)
+- **THEN** the command appends read-only checks for `polkit-agent-helper@.service`
+- **AND** reports whether systemd sandbox settings may block `/run/user` Secret Service bus access
+- **AND** reports whether systemd sandbox settings may hide or deny the configured `video_device`
+- **AND** returns exit code 0 only when the standard and polkit checks are all `pass`.
+
 #### Scenario: Config files discovered and validated
 
 - **GIVEN** the shared config loader that searches `/etc/chissu-pam/config.toml` then `/usr/local/etc/chissu-pam/config.toml`

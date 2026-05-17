@@ -1,8 +1,11 @@
 use std::env;
 use std::ffi::{CString, OsString};
+use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::{engine::general_purpose, Engine as _};
@@ -12,7 +15,8 @@ use chissu_face_core::secret_service::{
 use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::{
-    fork, getegid, geteuid, initgroups, setgid, setuid, ForkResult, Gid, Pid, Uid, User,
+    fork, getegid, geteuid, getgid, getuid, initgroups, setgid, setuid, ForkResult, Gid, Pid, Uid,
+    User,
 };
 use serde::{Deserialize, Serialize};
 
@@ -79,19 +83,25 @@ enum PrivilegeDropPlan {
 #[derive(Debug, Clone, Default)]
 pub struct HelperEnvOverrides {
     vars: Vec<(OsString, OsString)>,
+    removals: Vec<OsString>,
 }
 
 impl HelperEnvOverrides {
-    pub fn from_pairs(pairs: Vec<(String, String)>) -> Self {
+    pub fn from_parts(pairs: Vec<(String, String)>, removals: Vec<String>) -> Self {
         let vars = pairs
             .into_iter()
             .map(|(k, v)| (OsString::from(k), OsString::from(v)))
             .collect();
-        Self { vars }
+        let removals = removals.into_iter().map(OsString::from).collect();
+        Self { vars, removals }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &(OsString, OsString)> {
         self.vars.iter()
+    }
+
+    pub fn removals(&self) -> impl Iterator<Item = &OsString> {
+        self.removals.iter()
     }
 }
 
@@ -149,6 +159,18 @@ fn child_entry(
         );
     }
 
+    if let Err(message) = preflight_session_bus() {
+        emit_and_exit(
+            &mut stream,
+            HelperWireMessage::Error {
+                kind: HelperWireErrorKind::SecretServiceUnavailable,
+                message,
+                stage: None,
+                errno: None,
+            },
+        );
+    }
+
     let username = user.name.clone();
     match fetch_embedding_key(&username) {
         Ok(EmbeddingKeyStatus::Present(key)) => {
@@ -169,11 +191,12 @@ fn child_entry(
             );
         }
         Err(EmbeddingKeyLookupError::SecretService(err)) => {
+            let message = format!("{err}; {}", helper_context_summary());
             emit_and_exit(
                 &mut stream,
                 HelperWireMessage::Error {
                     kind: HelperWireErrorKind::SecretServiceUnavailable,
-                    message: err.to_string(),
+                    message,
                     stage: None,
                     errno: None,
                 },
@@ -247,8 +270,80 @@ fn emit_and_exit(stream: &mut UnixStream, payload: HelperWireMessage) -> ! {
 }
 
 fn apply_env_overrides(overrides: &HelperEnvOverrides) {
+    for key in overrides.removals() {
+        env::remove_var(key);
+    }
     for (key, value) in overrides.iter() {
         env::set_var(key, value);
+    }
+}
+
+fn preflight_session_bus() -> Result<(), String> {
+    let Some(address) = env::var_os("DBUS_SESSION_BUS_ADDRESS") else {
+        return Ok(());
+    };
+    let Some(path) = session_bus_path(address.to_string_lossy().as_ref()) else {
+        return Ok(());
+    };
+
+    UnixStream::connect(&path).map(|_| ()).map_err(|err| {
+        format!(
+            "DBus session bus preflight failed for {}: {}; {}",
+            path.display(),
+            err,
+            helper_context_summary()
+        )
+    })
+}
+
+fn session_bus_path(address: &str) -> Option<PathBuf> {
+    let path = address.strip_prefix("unix:path=")?;
+    let path = path.split(',').next().unwrap_or(path).trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn helper_context_summary() -> String {
+    let bus = env::var("DBUS_SESSION_BUS_ADDRESS")
+        .ok()
+        .and_then(|address| session_bus_path(&address))
+        .map(|path| format!("bus={}", path_summary(&path)))
+        .unwrap_or_else(|| "bus=-".into());
+    let runtime = env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .map(|path| format!("runtime={}", path_summary(Path::new(&path))))
+        .unwrap_or_else(|| "runtime=-".into());
+
+    format!(
+        "helper uid={} euid={} gid={} egid={} {runtime} {bus}",
+        getuid().as_raw(),
+        geteuid().as_raw(),
+        getgid().as_raw(),
+        getegid().as_raw(),
+    )
+}
+
+fn path_summary(path: &Path) -> String {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            let kind = if metadata.file_type().is_socket() {
+                "socket"
+            } else if metadata.is_dir() {
+                "dir"
+            } else if metadata.is_file() {
+                "file"
+            } else {
+                "other"
+            };
+            format!(
+                "{} kind={} uid={} gid={} mode={:o}",
+                path.display(),
+                kind,
+                metadata.uid(),
+                metadata.gid(),
+                metadata.permissions().mode() & 0o7777
+            )
+        }
+        Err(err) => format!("{} metadata_error={}", path.display(), err),
     }
 }
 
@@ -467,13 +562,17 @@ mod tests {
     fn helper_env_overrides_apply_variables() {
         env::remove_var("DISPLAY");
         env::remove_var("DBUS_SESSION_BUS_ADDRESS");
-        let overrides = HelperEnvOverrides::from_pairs(vec![
-            ("DISPLAY".into(), ":99".into()),
-            (
-                "DBUS_SESSION_BUS_ADDRESS".into(),
-                "unix:path=/tmp/fake-bus".into(),
-            ),
-        ]);
+        env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        let overrides = HelperEnvOverrides::from_parts(
+            vec![
+                ("DISPLAY".into(), ":99".into()),
+                (
+                    "DBUS_SESSION_BUS_ADDRESS".into(),
+                    "unix:path=/tmp/fake-bus".into(),
+                ),
+            ],
+            Vec::new(),
+        );
         assert!(overrides.iter().next().is_some());
         apply_env_overrides(&overrides);
         assert_eq!(env::var("DISPLAY").as_deref(), Ok(":99"));
@@ -481,5 +580,38 @@ mod tests {
             env::var("DBUS_SESSION_BUS_ADDRESS").as_deref(),
             Ok("unix:path=/tmp/fake-bus")
         );
+        assert_eq!(env::var("WAYLAND_DISPLAY").as_deref(), Ok("wayland-0"));
+    }
+
+    #[test]
+    fn helper_env_overrides_remove_variables() {
+        env::set_var("DISPLAY", ":0");
+        let overrides = HelperEnvOverrides::from_parts(Vec::new(), vec!["DISPLAY".into()]);
+
+        apply_env_overrides(&overrides);
+
+        assert!(env::var("DISPLAY").is_err());
+    }
+
+    #[test]
+    fn session_bus_path_extracts_unix_path_address() {
+        assert_eq!(
+            session_bus_path("unix:path=/run/user/1000/bus,guid=abc"),
+            Some(PathBuf::from("/run/user/1000/bus"))
+        );
+        assert_eq!(session_bus_path("autolaunch:scope=abc"), None);
+    }
+
+    #[test]
+    fn preflight_session_bus_accepts_connectable_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let bus = dir.path().join("bus");
+        let _listener = std::os::unix::net::UnixListener::bind(&bus).unwrap();
+        env::set_var(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", bus.display()),
+        );
+
+        assert!(preflight_session_bus().is_ok());
     }
 }

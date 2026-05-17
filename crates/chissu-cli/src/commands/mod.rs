@@ -27,7 +27,7 @@ impl From<Commands> for Box<dyn CommandHandler> {
             Commands::Enroll(args) => Box::new(EnrollHandler::new(args)),
             Commands::Faces(cmd) => Box::new(FacesHandler::new(cmd)),
             Commands::Keyring(cmd) => Box::new(KeyringHandler::new(cmd)),
-            Commands::Doctor => Box::new(DoctorHandler::new()),
+            Commands::Doctor(args) => Box::new(DoctorHandler::new(args)),
         }
     }
 }

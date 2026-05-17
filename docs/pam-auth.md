@@ -49,6 +49,7 @@ pixel_format = "Y16"            # V4L2 fourcc, default "Y16"
 warmup_frames = 2               # Discarded per-sample warm-up frames, default 0
 jitters = 2                     # Dlib jitter passes, default 1
 require_secret_service = false  # Opt-in to enforcing keyring availability before capture
+secret_service_session = "auto" # "auto", "x11", or "wayland" for helper env recovery
 landmark_model = "/opt/dlib/shape_predictor_68_face_landmarks.dat"
 encoder_model = "/opt/dlib/dlib_face_recognition_resnet_model_v1.dat"
 ```
@@ -76,7 +77,8 @@ Run `chissu-cli keyring check` (add `--json` for machine parsing) to confirm the
 Troubleshooting tips:
 
 - Ensure a session bus and `gnome-keyring-daemon` (or compatible Secret Service implementation) are running for the target user before PAM attempts begin.
-- When testing via `pamtester` or SSH, forward the DBus session variables (e.g., `DBUS_SESSION_BUS_ADDRESS`) or rely on a display manager that exports them automatically.
+- When testing via `pamtester` or SSH, forward the DBus session variables (e.g., `DBUS_SESSION_BUS_ADDRESS`) or rely on a display manager that exports them automatically. For polkit/1Password-style prompts, keep `secret_service_session = "auto"` unless logind reports the wrong session type; use `"x11"` or `"wayland"` only as an explicit override.
+- For polkit/1Password failures involving `DBus session bus preflight failed ... Permission denied` or hidden `/dev/videoX` devices, see [Polkit Agent Helper Troubleshooting](users-guide/polkit-agent-helper-troubleshooting.md).
 - Review `journalctl -t pam_chissu` for messages such as `Secret Service helper returned embedding key (...)` or `Embedding key missing for user ...` to confirm the helper outcome. Errors prefixed with `Secret Service unavailable` indicate the guard short-circuited with `PAM_IGNORE`.
 
 ## Runtime behaviour

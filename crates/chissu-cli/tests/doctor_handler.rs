@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-use chissu_cli::cli::OutputMode;
+use chissu_cli::cli::{DoctorArgs, OutputMode};
 use chissu_cli::commands::{CommandHandler, DoctorHandler};
 use chissu_cli::doctor::{CheckStatus, DoctorCheck, DoctorOutcome};
 use chissu_cli::errors::AppError;
@@ -26,23 +26,36 @@ fn sample_outcome(ok: bool) -> DoctorOutcome {
 #[test]
 fn doctor_handler_uses_render_and_exit_code() {
     let renders = Arc::new(Mutex::new(0));
-    let handler = DoctorHandler::with_dependencies(|| Ok(sample_outcome(false)), {
-        let renders = Arc::clone(&renders);
-        move |_outcome, _mode| {
-            *renders.lock().unwrap() += 1;
-            Ok(())
-        }
-    });
+    let captured = Arc::new(Mutex::new(None));
+    let handler = DoctorHandler::with_dependencies(
+        DoctorArgs { polkit: true },
+        {
+            let captured = Arc::clone(&captured);
+            move |options| {
+                *captured.lock().unwrap() = Some(options);
+                Ok(sample_outcome(false))
+            }
+        },
+        {
+            let renders = Arc::clone(&renders);
+            move |_outcome, _mode| {
+                *renders.lock().unwrap() += 1;
+                Ok(())
+            }
+        },
+    );
 
     let code = handler.execute(OutputMode::Human, false).unwrap();
     assert_eq!(code, ExitCode::from(1));
     assert_eq!(*renders.lock().unwrap(), 1);
+    assert!(captured.lock().unwrap().unwrap().include_polkit);
 }
 
 #[test]
 fn doctor_handler_propagates_errors() {
     let handler = DoctorHandler::with_dependencies(
-        || Err(AppError::Capability("boom".into())),
+        DoctorArgs { polkit: false },
+        |_options| Err(AppError::Capability("boom".into())),
         |_outcome, _mode| Ok(()),
     );
 

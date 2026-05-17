@@ -213,7 +213,7 @@ To roll back just the PAM wiring, run `sudo scripts/install-chissu.sh --uninstal
 
 ### Secret Service + logind troubleshooting
 
-`pam_chissu` now hydrates missing `$DISPLAY`, `$DBUS_SESSION_BUS_ADDRESS`, and `$XDG_RUNTIME_DIR` variables from systemd-logind whenever `require_secret_service = true`. This matters for PAM clients like polkit-1 (1Password unlock dialogs, GNOME Software updates, etc.) that invoke authentication without inheriting your desktop environment. Use these checks whenever the journal logs `Secret Service unavailable; skipping face authentication` or `No active logind session`:
+`pam_chissu` now hydrates missing or unusable `$DBUS_SESSION_BUS_ADDRESS`, `$XDG_RUNTIME_DIR`, `$DISPLAY`, and `$WAYLAND_DISPLAY` variables from systemd-logind whenever `require_secret_service = true`. This matters for PAM clients like polkit-1 (1Password unlock dialogs, GNOME Software updates, etc.) that invoke authentication without inheriting your desktop environment. The default `secret_service_session = "auto"` detects X11 vs Wayland from logind's `Type`/`Display`; set it to `"x11"` or `"wayland"` only when an unusual desktop stack needs an explicit override. Use these checks whenever the journal logs `Secret Service unavailable; skipping face authentication` or `No active logind session`:
 
 1. **Confirm the session exists**
 
@@ -229,17 +229,22 @@ To roll back just the PAM wiring, run `sudo scripts/install-chissu.sh --uninstal
    loginctl show-session <id> -p Display -p Type -p TTY -p Remote -p State
    ```
 
-   The helper copies `Display` (e.g., `:0` or `wayland-0`) plus the runtime seat info before forking.
+   The helper uses `Type` plus `Display` to decide whether to export `DISPLAY` for X11 or `WAYLAND_DISPLAY` for Wayland before forking.
 
 3. **Verify the runtime directory**
 
    ```bash
    loginctl show-user $(id -u $USER) -p RuntimePath
+   test -S /run/user/$(id -u)/bus
    ```
 
-   A valid runtime dir allows the helper to synthesize `unix:path=$XDG_RUNTIME_DIR/bus` for Secret Service.
+   A valid runtime dir allows the helper to synthesize `unix:path=$XDG_RUNTIME_DIR/bus` for Secret Service. This session bus is the important path on Wayland-only systems; otherwise libdbus may fall back to X11 autolaunch and fail with messages such as `Unable to autolaunch a dbus-daemon without a $DISPLAY for X11`.
 
-Successful hydration emits `Recovered session environment from logind for user 'alice': session=3 tty=tty2 seat=seat0 type=wayland ...` in syslog. If you instead see `No active logind session for user 'alice' (tty hint tty2)` the PAM stack will fall back to passwords until that desktop session is running/unlocked.
+Successful hydration emits `Recovered Secret Service session environment from logind for user 'alice': session=3 tty=tty2 seat=seat0 type=wayland ... configured_mode=auto selected_mode=wayland applied=...` in syslog. If you instead see `No active logind session for user 'alice' (tty hint tty2)` the PAM stack will fall back to passwords until that desktop session is running/unlocked.
+
+If the recovered address still fails with `Failed to connect to socket /run/user/<uid>/bus: Permission denied`, the helper logs a DBus preflight line with its `uid/euid/gid/egid` plus the runtime directory and bus socket owner/mode. That usually indicates the PAM caller is isolated from the user's runtime bus by the service manager or a security profile, not that X11/Wayland detection failed.
+
+Ubuntu 26.04 no longer offers an X11-based GNOME session in typical installs, so Wayland-only behavior is expected there; see [Ubuntu Weekly Recipe 908](https://gihyo.jp/admin/serial/01/ubuntu-recipe/0908). Keep `secret_service_session = "auto"` unless logind reports misleading session data.
 
 Desktop unlock services such as `cinnamon-screensaver` may invoke PAM from a context that cannot perform `setuid`/`setgid` again. When that happens, `pam_chissu` now logs the failing privilege-drop stage and intentionally falls back to password authentication instead of aborting the entire unlock flow.
 
@@ -275,10 +280,13 @@ Run a quick, non-destructive diagnostic to confirm PAM + enrollment prerequisite
 
 ```bash
 chissu-cli doctor            # human-readable
+chissu-cli doctor --polkit   # include polkit-agent-helper sandbox checks
 chissu-cli --json doctor | jq
 ```
 
 Checks include config discovery/parse, video device access, embedding store permissions, dlib model readability, Secret Service availability, the PAM module location, and whether `/etc/pam.d/*` references `pam_chissu`. Exit code is `0` only when every check passes; warnings (e.g., both config files present) or failures return `1` with details per check.
+
+Add `--polkit` when debugging 1Password or other polkit-based desktop prompts. The extra checks inspect `polkit-agent-helper@.service` and report sandbox settings that can hide `/run/user/<uid>/bus` or the configured camera device; see [Polkit Agent Helper Troubleshooting](docs/users-guide/polkit-agent-helper-troubleshooting.md) for the matching systemd drop-in guidance.
 
 ### Enroll with live capture (`chissu-cli enroll`)
 
@@ -346,6 +354,7 @@ The first file that exists wins for each key; CLI flags or environment variables
 | `capture_timeout_secs` / `frame_interval_millis` | Live-auth capture timing knobs.                                                            |
 | `jitters`                                        | Number of random jitters applied when encoding embeddings.                                 |
 | `require_secret_service`                         | Fail fast when the Secret Service helper cannot obtain a key.                              |
+| `secret_service_session`                         | Secret Service helper session mode: `auto`, `x11`, or `wayland` (default `auto`).          |
 
 For CLI operations, `chissu-config` also honours `CHISSU_PAM_STORE_DIR` for embedding storage overrides plus any immediate CLI flags. After editing the TOML file, re-run `chissu-cli keyring check` and a quick `chissu-cli capture --json` to verify the new settings.
 

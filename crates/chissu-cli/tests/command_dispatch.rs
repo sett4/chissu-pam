@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use chissu_cli::capture::CaptureHandler;
 use chissu_cli::cli::{
-    CaptureArgs, Commands, EnrollArgs, FaceExtractArgs, FacesCommands, KeyringCheckArgs,
-    KeyringCommands,
+    CaptureArgs, Commands, DoctorArgs, EnrollArgs, FaceExtractArgs, FacesCommands,
+    KeyringCheckArgs, KeyringCommands,
 };
 use chissu_cli::commands::{
     CommandHandler, DoctorHandler, EnrollHandler, FacesHandler, KeyringHandler,
@@ -79,5 +79,5 @@ fn keyring_command_dispatches_keyring_handler() {
 
 #[test]
 fn doctor_command_dispatches_doctor_handler() {
-    assert_dispatch::<DoctorHandler>(Commands::Doctor);
+    assert_dispatch::<DoctorHandler>(Commands::Doctor(DoctorArgs { polkit: false }));
 }
