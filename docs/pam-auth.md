@@ -81,6 +81,71 @@ Troubleshooting tips:
 - For polkit/1Password failures involving `DBus session bus preflight failed ... Permission denied` or hidden `/dev/videoX` devices, see [Polkit Agent Helper Troubleshooting](users-guide/polkit-agent-helper-troubleshooting.md).
 - Review `journalctl -t pam_chissu` for messages such as `Secret Service helper returned embedding key (...)` or `Embedding key missing for user ...` to confirm the helper outcome. Errors prefixed with `Secret Service unavailable` indicate the guard short-circuited with `PAM_IGNORE`.
 
+## Secret Service and logind troubleshooting
+
+`pam_chissu` hydrates missing or unusable `$DBUS_SESSION_BUS_ADDRESS`,
+`$XDG_RUNTIME_DIR`, `$DISPLAY`, and `$WAYLAND_DISPLAY` values from
+systemd-logind whenever `require_secret_service = true`. This matters for PAM
+clients such as polkit-1 prompts that invoke authentication without inheriting
+the desktop environment.
+
+The default `secret_service_session = "auto"` detects X11 versus Wayland from
+logind's `Type` and `Display` properties. Set it to `"x11"` or `"wayland"` only
+when an unusual desktop stack needs an explicit override.
+
+Use these checks whenever the journal logs `Secret Service unavailable; skipping
+face authentication` or `No active logind session`:
+
+1. Confirm the session exists:
+
+   ```bash
+   loginctl list-sessions
+   ```
+
+   Ensure the target user shows an active session bound to the expected seat and
+   TTY.
+
+2. Inspect session properties:
+
+   ```bash
+   loginctl show-session <id> -p Display -p Type -p TTY -p Remote -p State
+   ```
+
+   The helper uses `Type` plus `Display` to decide whether to export `DISPLAY`
+   for X11 or `WAYLAND_DISPLAY` for Wayland before forking.
+
+3. Verify the runtime directory:
+
+   ```bash
+   loginctl show-user $(id -u $USER) -p RuntimePath
+   test -S /run/user/$(id -u)/bus
+   ```
+
+   A valid runtime directory allows the helper to synthesize
+   `unix:path=$XDG_RUNTIME_DIR/bus` for Secret Service. On Wayland-only systems,
+   this session bus is the important path; otherwise libdbus may fall back to
+   X11 autolaunch and fail without a display.
+
+Successful hydration emits a syslog line similar to:
+
+```text
+Recovered Secret Service session environment from logind for user 'alice': ...
+```
+
+If the recovered address still fails with `Permission denied`, the helper logs a
+DBus preflight line with its uid/gid values plus the runtime directory and bus
+socket owner/mode. That usually means the PAM caller is isolated from the user's
+runtime bus by the service manager or a security profile.
+
+Ubuntu 26.04 no longer offers an X11-based GNOME session in typical installs, so
+Wayland-only behavior is expected there. Keep `secret_service_session = "auto"`
+unless logind reports misleading session data.
+
+Desktop unlock services such as `cinnamon-screensaver` may invoke PAM from a
+context that cannot perform `setuid`/`setgid` again. When that happens,
+`pam_chissu` logs the failing privilege-drop stage and falls back to password
+authentication instead of aborting the entire unlock flow.
+
 ## Runtime behaviour
 
 - The module opens the configured V4L2 device for each authentication attempt and captures frames until either:

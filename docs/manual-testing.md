@@ -52,4 +52,4 @@ cargo run -p chissu-cli -- capture \
 ## Cleanup
 
 - Remove temporary captures if needed: `rm captures/*.png`.
-- Re-run `cargo test --workspace` (and targeted `cargo test -p chissu-cli` / `cargo test -p pam_chissu` if you touched those crates) to ensure automated checks still pass after manual scenarios.
+- Re-run `cargo test --workspace` (and targeted `cargo test -p chissu-cli` / `cargo test -p pam-chissu` if you touched those crates) to ensure automated checks still pass after manual scenarios.
